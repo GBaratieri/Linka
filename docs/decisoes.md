@@ -276,7 +276,37 @@ precisaram ser ajustados para alinhar com a nova versão antes de seguir para fa
   duas chamadas (algo que não existia antes: a Fase 2 só tinha testado o caminho mock). A ressalva
   já registrada acima continua valendo — o formato exato da URL/consulta ainda não foi validado
   contra a API real.
-- **Verificador de consistência (Fase 2 da v2) e as demais fases novas ainda não foram
-  retrofitadas** — ficam para quando essas fases forem de fato executadas, já que envolvem decisões
-  de produto (ex.: se uma empresa pode ter mais de uma `fonte_dados` simultânea para comparar) que
-  precisam ser confirmadas antes de implementar.
+## Verificador de consistência (Fase 2 do CLAUDE.md v2)
+
+Confirmado com o dono do projeto: uma empresa passa a poder ter mais de uma `fonte_dados` — depois
+de confirmar a revisão de uma fonte, o usuário pode voltar e complementar com outra (ex.: começou
+pelo Google, depois adiciona o Instagram) para o verificador ter o que comparar.
+
+- **`campo_extraido` passa a ter uma linha por origem, não mais uma por campo**: a constraint única
+  virou `(empresa_id, campo, origem)` (era `(empresa_id, campo)`, adicionada na leva de correções
+  anterior — ver migração `20260920120000_campo_extraido_unico_por_origem.sql`). A resolução de
+  conflito (qual valor "vale", seção 8 do CLAUDE.md) deixou de acontecer na gravação e passou para a
+  leitura: `gravarCampos` agora é um upsert simples por origem (sem mais precisar consultar o que já
+  existe antes de decidir inserir ou atualizar — cada origem só mexe na própria linha), e uma nova
+  função `calcularValoresEfetivos` (`lib/conectores/normalizador.ts`) reduz as várias linhas de um
+  campo a um valor efetivo, reaproveitando a mesma `deveSubstituirCampo` de antes. Uma edição do
+  usuário na revisão (`editado_pelo_usuario=true`) sempre vence nesse cálculo, mesmo contra uma
+  origem com prioridade (ex.: Google no telefone) — é a palavra final dele sobre o próprio dado, não
+  mais uma fonte disputando prioridade com as outras.
+- **`lib/consistencia/comparador.ts`**: compara nome, telefone, endereço e horário (os campos
+  citados na Fase 2 do CLAUDE.md v2) entre as origens não editadas pelo usuário; um campo só
+  entra na lista se pelo menos duas origens tiverem valores diferentes para ele. A tela de revisão
+  mostra um aviso com o valor de cada fonte ao lado do campo divergente ("Google: X · Instagram:
+  Y") — o próprio campo de edição já existente serve como a escolha do usuário, sem precisar de um
+  seletor novo.
+- **Complementar depois da revisão, não no `/novo`**: em vez de pedir os dois links já na entrada
+  (mudaria o fluxo "um único link" aprovado na Fase 1), a tela `/empresa/[id]/adicionar-fonte` só
+  fica acessível depois que `empresa.declaracao_titularidade_em` já está preenchido (ou seja, a
+  primeira revisão já foi confirmada). Uma empresa só pode ter uma fonte por tipo — pedir a mesma
+  fonte de novo não traria dado novo para comparar; `lib/conectores/adicionarFonte.ts` rejeita nesse
+  caso. Depois de adicionar, o fluxo volta para `/empresa/[id]`, que já sabe processar a fonte mais
+  recente pendente (nenhuma mudança precisou ser feita ali).
+- **Comparação de `horarios` por igualdade estrutural simples (`JSON.stringify`)**: sensível à ordem
+  dos dias dentro do array. Suficiente para o caso comum (mesma ordem de extração), mas uma futura
+  divergência só de ordem (sem diferença real de horário) apontaria um falso positivo — aceitável
+  por ora, documentado aqui para não ser confundido com um bug se aparecer.
