@@ -28,6 +28,19 @@ export function hostPermitido(host: string): boolean {
   return HOSTS_PERMITIDOS.has(normalizarHost(host));
 }
 
+// google.com/www.google.com só são um link de Maps quando o caminho começa
+// com "/maps" (mesma regra de lib/conectores/roteador.ts — precisa ficar em
+// sincronia com HOSTS_GOOGLE_COM de lá).
+const HOSTS_CAMINHO_OBRIGATORIO: Record<string, string> = {
+  'google.com': '/maps',
+  'www.google.com': '/maps',
+};
+
+export function caminhoPermitidoParaHost(host: string, pathname: string): boolean {
+  const caminhoExigido = HOSTS_CAMINHO_OBRIGATORIO[normalizarHost(host)];
+  return !caminhoExigido || pathname.startsWith(caminhoExigido);
+}
+
 function ipv4EhPrivadoOuReservado(ip: string): boolean {
   const partes = ip.split('.').map(Number);
   if (partes.length !== 4 || partes.some((p) => Number.isNaN(p))) {
@@ -69,13 +82,17 @@ export function ipEhPrivadoOuReservado(ip: string): boolean {
   return true; // não é um IP válido — trata como não permitido
 }
 
-async function validarHost(hostname: string): Promise<void> {
+async function validarHost(hostname: string, pathname: string): Promise<void> {
   if (net.isIP(hostname)) {
     throw new ErroSsrf(`Host não permitido: ${hostname}`);
   }
 
   if (!hostPermitido(hostname)) {
     throw new ErroSsrf(`Host não permitido: ${hostname}`);
+  }
+
+  if (!caminhoPermitidoParaHost(hostname, pathname)) {
+    throw new ErroSsrf(`Caminho não permitido para "${hostname}": ${pathname}`);
   }
 
   const enderecos = await dns.lookup(hostname, { all: true });
@@ -112,7 +129,7 @@ export async function buscarComSeguranca(
       throw new ErroSsrf(`Protocolo não permitido: ${urlAtual.protocol}`);
     }
 
-    await validarHost(urlAtual.hostname);
+    await validarHost(urlAtual.hostname, urlAtual.pathname);
 
     const controlador = new AbortController();
     const timeout = setTimeout(() => controlador.abort(), timeoutMs);

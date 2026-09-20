@@ -11,6 +11,7 @@ vi.mock('node:dns', () => {
 import { promises as dns } from 'node:dns';
 import {
   buscarComSeguranca,
+  caminhoPermitidoParaHost,
   ErroSsrf,
   hostPermitido,
   ipEhPrivadoOuReservado,
@@ -46,6 +47,24 @@ describe('hostPermitido', () => {
       expect(hostPermitido(host)).toBe(false);
     },
   );
+});
+
+describe('caminhoPermitidoParaHost', () => {
+  it.each([
+    ['google.com', '/maps/place/Empresa'],
+    ['www.google.com', '/maps'],
+    ['instagram.com', '/qualquer-caminho'],
+    ['maps.app.goo.gl', '/AbCdEfG'],
+  ])('permite "%s%s"', (host, caminho) => {
+    expect(caminhoPermitidoParaHost(host, caminho)).toBe(true);
+  });
+
+  it.each([
+    ['google.com', '/search'],
+    ['www.google.com', '/'],
+  ])('rejeita "%s%s" (mesma regra do roteador: exige /maps)', (host, caminho) => {
+    expect(caminhoPermitidoParaHost(host, caminho)).toBe(false);
+  });
 });
 
 describe('ipEhPrivadoOuReservado', () => {
@@ -130,6 +149,18 @@ describe('buscarComSeguranca', () => {
 
     expect(resposta.status).toBe(200);
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejeita um redirecionamento para google.com fora do caminho /maps', async () => {
+    lookupMock.mockResolvedValue([{ address: '157.240.0.1', family: 4 }]);
+
+    const redirecionamento = new Response(null, {
+      status: 302,
+      headers: { location: 'https://www.google.com/search?q=empresa' },
+    });
+    vi.mocked(fetch).mockResolvedValue(redirecionamento);
+
+    await expect(buscarComSeguranca('https://g.page/empresa')).rejects.toThrow(ErroSsrf);
   });
 
   it('rejeita um redirecionamento para um host fora da lista de permissão', async () => {
