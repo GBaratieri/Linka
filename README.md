@@ -1,14 +1,15 @@
-# SiteLink
+# Linka
 
-Plataforma web (MVP de TCC) que gera uma landing page para uma microempresa brasileira a partir
-de um único link (Instagram ou Google). Veja a missão completa e as regras do projeto em
-[`CLAUDE.md`](./CLAUDE.md).
+Plataforma web que gera e mantém a landing page de uma microempresa brasileira a partir de um
+único link (Instagram ou Google), vendida por assinatura mensal. Veja a missão completa e as
+regras do projeto em [`CLAUDE.md`](./CLAUDE.md).
 
 ## Stack
 
 Next.js (App Router) + TypeScript (strict) + Tailwind CSS, Supabase (Postgres + Auth + Storage),
 Zod, SDK oficial da Anthropic, Google Places API (New), Vitest e Playwright (E2E, a partir da
-Fase 5).
+Fase 5). Cobrança (Asaas) e e-mail transacional (Resend) entram nas fases 7 e 8 — ver
+[`CLAUDE.md`](./CLAUDE.md).
 
 ## Como rodar
 
@@ -59,15 +60,22 @@ Sem essas chaves, deixe `USE_MOCKS=true` e o sistema usa fixtures determinístic
 
 ```
 src/
-  app/          # rotas (App Router)
-  lib/          # conectores, IA, schemas, componentes de site, segurança, métricas
+  app/            # rotas (App Router)
+  lib/
+    conectores/   # roteador de link, Google, Instagram, manual
+    ia/           # estruturador, custo/tokens
+    consistencia/ # verificador de consistência entre fontes
+    metricas/     # custo estimado de IA em reais
+    schemas/      # contratos Zod
+    supabase/     # cliente e tipos do banco
 supabase/
-  migrations/   # migrações SQL do Postgres (Supabase)
+  migrations/     # migrações SQL do Postgres (Supabase)
 tests/
-  unit/         # testes unitários/integração (Vitest)
+  unit/           # testes unitários
+  integration/    # testes de integração (Vitest, com mocks)
 docs/
-  decisoes.md   # decisões técnicas registradas ao longo do projeto
-  fases/        # relatório de cada fase de desenvolvimento
+  decisoes.md     # decisões técnicas registradas ao longo do projeto
+  fases/          # relatório de cada fase de desenvolvimento
 ```
 
 ## Documentação
