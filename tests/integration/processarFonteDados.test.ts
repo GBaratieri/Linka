@@ -3,8 +3,30 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@/lib/supabase/tipos-banco';
 import { processarFonteDados } from '@/lib/conectores/normalizador';
 
+interface LinhaMock {
+  id: string;
+  campo: string;
+  valor: unknown;
+  origem: string;
+  confianca: string;
+}
+
+// Encadeável o bastante para cobrir `.select().eq()` (direto) e
+// `.select().eq().in(...).order(...)` (usado por sincronizarNomeESegmento).
+function consultaEncadeavel(dados: LinhaMock[]): PromiseLike<{ data: LinhaMock[]; error: null }> & {
+  in: (coluna: string, valores: string[]) => ReturnType<typeof consultaEncadeavel>;
+  order: () => ReturnType<typeof consultaEncadeavel>;
+} {
+  const promessa = Promise.resolve({ data: dados, error: null });
+  return Object.assign(promessa, {
+    in: (_coluna: string, valores: string[]) =>
+      consultaEncadeavel(dados.filter((linha) => valores.includes(linha.campo))),
+    order: () => consultaEncadeavel(dados),
+  });
+}
+
 function criarClienteMock() {
-  const camposPorEmpresa = new Map<string, Array<{ id: string; campo: string; valor: unknown }>>();
+  const camposPorEmpresa = new Map<string, LinhaMock[]>();
   const chamadasFonteUpdate: unknown[] = [];
   const eventosRegistrados: Array<{ tipo: string; payload: unknown }> = [];
   let proximoId = 1;
@@ -13,28 +35,31 @@ function criarClienteMock() {
     if (tabela === 'campo_extraido') {
       return {
         select: vi.fn(() => ({
-          eq: vi.fn((_coluna: string, empresaId: string) => {
-            const promessa = Promise.resolve({
-              data: camposPorEmpresa.get(empresaId) ?? [],
-              error: null,
-            });
-            return Object.assign(promessa, {
-              in: vi.fn(async (_coluna2: string, valores: string[]) => ({
-                data: (camposPorEmpresa.get(empresaId) ?? []).filter((c) =>
-                  valores.includes(c.campo),
-                ),
-                error: null,
-              })),
-            });
-          }),
+          eq: vi.fn((_coluna: string, empresaId: string) =>
+            consultaEncadeavel(camposPorEmpresa.get(empresaId) ?? []),
+          ),
         })),
-        upsert: vi.fn(async (valores: { empresa_id: string; campo: string; valor: unknown }) => {
-          const lista = camposPorEmpresa.get(valores.empresa_id) ?? [];
-          lista.push({ id: String(proximoId++), campo: valores.campo, valor: valores.valor });
-          camposPorEmpresa.set(valores.empresa_id, lista);
-          return { data: null, error: null };
-        }),
-        update: vi.fn(() => ({ eq: vi.fn(async () => ({ data: null, error: null })) })),
+        upsert: vi.fn(
+          async (valores: { empresa_id: string; campo: string; valor: unknown; origem: string; confianca: string }) => {
+            const lista = camposPorEmpresa.get(valores.empresa_id) ?? [];
+            const existente = lista.find(
+              (l) => l.campo === valores.campo && l.origem === valores.origem,
+            );
+            if (existente) {
+              Object.assign(existente, valores);
+            } else {
+              lista.push({
+                id: String(proximoId++),
+                campo: valores.campo,
+                valor: valores.valor,
+                origem: valores.origem,
+                confianca: valores.confianca,
+              });
+            }
+            camposPorEmpresa.set(valores.empresa_id, lista);
+            return { data: null, error: null };
+          },
+        ),
       };
     }
 

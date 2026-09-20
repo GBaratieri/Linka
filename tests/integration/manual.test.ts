@@ -14,14 +14,31 @@ const HORARIOS_VAZIOS: FormularioManualInput['horarios'] = [
   { dia: 'dom', abre: null, fecha: null },
 ];
 
+interface LinhaMock {
+  id: string;
+  campo: string;
+  valor: unknown;
+  origem: string;
+  confianca: string;
+}
+
+// Encadeável o bastante para cobrir tanto `.select().eq()` (direto) quanto
+// `.select().eq().in(...).order(...)` (usado por sincronizarNomeESegmento) —
+// qualquer combinação resolve para os dados (já filtrados por `.in`).
+function consultaEncadeavel(dados: LinhaMock[]): PromiseLike<{ data: LinhaMock[]; error: null }> & {
+  in: (coluna: string, valores: string[]) => ReturnType<typeof consultaEncadeavel>;
+  order: () => ReturnType<typeof consultaEncadeavel>;
+} {
+  const promessa = Promise.resolve({ data: dados, error: null });
+  return Object.assign(promessa, {
+    in: (_coluna: string, valores: string[]) =>
+      consultaEncadeavel(dados.filter((linha) => valores.includes(linha.campo))),
+    order: () => consultaEncadeavel(dados),
+  });
+}
+
 function criarClienteMock() {
-  const linhas: Array<{
-    id: string;
-    campo: string;
-    valor: unknown;
-    origem: string;
-    confianca: string;
-  }> = [];
+  const linhas: LinhaMock[] = [];
   const chamadasEmpresaUpdate: unknown[] = [];
   const chamadasFonteUpdate: unknown[] = [];
   let proximoId = 1;
@@ -31,30 +48,18 @@ function criarClienteMock() {
       return {
         upsert: vi.fn(
           async (valores: { campo: string; valor: unknown; origem: string; confianca: string }) => {
-            linhas.push({ id: String(proximoId++), ...valores });
+            const existente = linhas.find(
+              (l) => l.campo === valores.campo && l.origem === valores.origem,
+            );
+            if (existente) {
+              Object.assign(existente, valores);
+            } else {
+              linhas.push({ id: String(proximoId++), ...valores });
+            }
             return { data: null, error: null };
           },
         ),
-        update: vi.fn((valores: { valor: unknown; origem: string; confianca: string }) => ({
-          eq: vi.fn(async (_coluna: string, id: string) => {
-            const linha = linhas.find((l) => l.id === id);
-            if (linha) Object.assign(linha, valores);
-            return { data: null, error: null };
-          }),
-        })),
-        select: vi.fn(() => ({
-          eq: vi.fn(() => {
-            const promessa = Promise.resolve({ data: [...linhas], error: null });
-            return Object.assign(promessa, {
-              in: vi.fn(async () => ({
-                data: linhas
-                  .filter((l) => l.campo === 'nome' || l.campo === 'segmento')
-                  .map((l) => ({ campo: l.campo, valor: l.valor })),
-                error: null,
-              })),
-            });
-          }),
-        })),
+        select: vi.fn(() => ({ eq: vi.fn(() => consultaEncadeavel([...linhas])) })),
       };
     }
 

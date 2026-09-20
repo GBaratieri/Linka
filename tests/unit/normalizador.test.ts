@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { deveSubstituirCampo } from '@/lib/conectores/normalizador';
+import {
+  deveSubstituirCampo,
+  calcularValoresEfetivos,
+  type LinhaCampoExtraido,
+} from '@/lib/conectores/normalizador';
 
 describe('deveSubstituirCampo', () => {
   it('mantém o valor do Google em endereco.texto mesmo com confiança menor que a nova fonte', () => {
@@ -64,5 +68,55 @@ describe('deveSubstituirCampo', () => {
         { fonte: 'google', confianca: 'alta' },
       ),
     ).toBe(true);
+  });
+});
+
+describe('calcularValoresEfetivos', () => {
+  const linha = (
+    parcial: Partial<LinhaCampoExtraido> &
+      Pick<LinhaCampoExtraido, 'campo' | 'valor' | 'origem'>,
+  ): LinhaCampoExtraido => ({ confianca: 'alta', ...parcial });
+
+  it('aplica a mesma regra de prioridade de deveSubstituirCampo entre as origens', () => {
+    const efetivos = calcularValoresEfetivos([
+      linha({ campo: 'endereco.texto', valor: 'Endereço do Instagram', origem: 'instagram' }),
+      linha({ campo: 'endereco.texto', valor: 'Endereço do Google', origem: 'google' }),
+    ]);
+
+    expect(efetivos.get('endereco.texto')?.valor).toBe('Endereço do Google');
+  });
+
+  it('uma edição do usuário sempre vence, mesmo contra uma origem com prioridade', () => {
+    const efetivos = calcularValoresEfetivos([
+      linha({ campo: 'contato.telefone', valor: '11 3000-0000', origem: 'google' }),
+      linha({
+        campo: 'contato.telefone',
+        valor: '11 90000-0000',
+        origem: 'manual',
+        editado_pelo_usuario: true,
+      }),
+    ]);
+
+    expect(efetivos.get('contato.telefone')?.valor).toBe('11 90000-0000');
+  });
+
+  it('em empate de confiança e origem, processa na ordem recebida e a mais recente vence', () => {
+    const efetivos = calcularValoresEfetivos([
+      linha({ campo: 'descricao_curta', valor: 'Primeira versão', origem: 'instagram' }),
+      linha({ campo: 'descricao_curta', valor: 'Segunda versão', origem: 'manual' }),
+    ]);
+
+    expect(efetivos.get('descricao_curta')?.valor).toBe('Segunda versão');
+  });
+
+  it('devolve um valor por campo mesmo com múltiplas origens diferentes', () => {
+    const efetivos = calcularValoresEfetivos([
+      linha({ campo: 'nome', valor: 'Nome do Google', origem: 'google' }),
+      linha({ campo: 'contato.instagram', valor: 'empresa.oficial', origem: 'instagram' }),
+    ]);
+
+    expect(efetivos.size).toBe(2);
+    expect(efetivos.get('nome')?.origem).toBe('google');
+    expect(efetivos.get('contato.instagram')?.origem).toBe('instagram');
   });
 });

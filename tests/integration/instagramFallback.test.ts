@@ -4,30 +4,55 @@ import type { Database } from '@/lib/supabase/tipos-banco';
 import { processarFallbackInstagram } from '@/lib/conectores/instagram';
 import type { FormularioInstagramInput } from '@/lib/schemas/manual';
 
+interface LinhaMock {
+  campo: string;
+  valor: unknown;
+  origem: string;
+  confianca: string;
+}
+
+type ResultadoConsulta =
+  | { data: LinhaMock[]; error: null }
+  | { data: null; error: { message: string } };
+
+// Encadeável o bastante para cobrir `.select().eq()` (direto) e
+// `.select().eq().in(...).order(...)` (usado por sincronizarNomeESegmento).
+function consultaEncadeavel(
+  resultado: ResultadoConsulta,
+): PromiseLike<ResultadoConsulta> & {
+  in: (coluna: string, valores: string[]) => ReturnType<typeof consultaEncadeavel>;
+  order: () => ReturnType<typeof consultaEncadeavel>;
+} {
+  const promessa = Promise.resolve(resultado);
+  return Object.assign(promessa, {
+    in: (_coluna: string, valores: string[]) =>
+      resultado.error
+        ? consultaEncadeavel(resultado)
+        : consultaEncadeavel({
+            data: resultado.data.filter((linha) => valores.includes(linha.campo)),
+            error: null,
+          }),
+    order: () => consultaEncadeavel(resultado),
+  });
+}
+
 function criarClienteMock(opcoes: { erroConsulta?: boolean } = {}) {
-  const camposInseridos: Array<{ campo: string; valor: unknown }> = [];
+  const camposInseridos: LinhaMock[] = [];
   const chamadasFonteUpdate: unknown[] = [];
 
   const from = vi.fn((tabela: string) => {
     if (tabela === 'campo_extraido') {
       return {
-        upsert: vi.fn(async (valores: { campo: string; valor: unknown }) => {
+        upsert: vi.fn(async (valores: LinhaMock) => {
           camposInseridos.push(valores);
           return { data: null, error: null };
         }),
         select: vi.fn(() => ({
-          eq: vi.fn(() => {
-            if (opcoes.erroConsulta) {
-              return Promise.resolve({ data: null, error: { message: 'falhou' } });
-            }
-            const promessa = Promise.resolve({ data: [] as unknown[], error: null });
-            return Object.assign(promessa, {
-              in: vi.fn(async (_coluna: string, valores: string[]) => ({
-                data: camposInseridos.filter((c) => valores.includes(c.campo)),
-                error: null,
-              })),
-            });
-          }),
+          eq: vi.fn(() =>
+            opcoes.erroConsulta
+              ? consultaEncadeavel({ data: null, error: { message: 'falhou' } })
+              : consultaEncadeavel({ data: [...camposInseridos], error: null }),
+          ),
         })),
       };
     }

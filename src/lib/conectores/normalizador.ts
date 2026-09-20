@@ -59,64 +59,79 @@ export interface CampoParaGravar {
   confianca: Confianca;
 }
 
-// Upsert genérico usado tanto pelo estruturador de IA (Google/Instagram)
-// quanto pelo formulário manual: consulta o que já existe para a empresa e
-// decide inserir ou atualizar por caminho, aplicando a regra de conflito.
-// Usa upsert (não insert simples) na inserção para não criar linhas
-// duplicadas em reenvios do formulário ou corridas simultâneas — ver a
-// constraint única em
-// supabase/migrations/20260920110000_campo_extraido_unico_por_campo.sql.
-// Erros do Supabase são propagados (lançados) em vez de ignorados, para que
-// o chamador saiba que a gravação falhou e não marque a fonte como "ok".
+// Cada origem tem sua própria linha por campo (constraint única em
+// empresa_id+campo+origem — ver
+// supabase/migrations/20260920120000_campo_extraido_unico_por_origem.sql),
+// então gravar nunca precisa decidir "substitui ou não": é sempre um upsert
+// na linha daquela origem. A regra de conflito (seção 8 do CLAUDE.md) e o
+// Verificador de consistência operam na leitura, comparando as linhas de
+// todas as origens — ver calcularValoresEfetivos, mais abaixo, e
+// lib/consistencia/comparador.ts. Usa upsert (não insert simples) para não
+// duplicar linhas em reenvios do formulário ou corridas simultâneas. Erros
+// do Supabase são propagados (lançados) em vez de ignorados, para que o
+// chamador saiba que a gravação falhou e não marque a fonte como "ok".
 export async function gravarCampos(
   supabase: SupabaseClient<Database>,
   empresaId: string,
   campos: CampoParaGravar[],
 ): Promise<void> {
-  const { data: existentes, error: erroConsulta } = await supabase
-    .from('campo_extraido')
-    .select('id, campo, origem, confianca')
-    .eq('empresa_id', empresaId);
-
-  if (erroConsulta) {
-    throw new Error(`Falha ao consultar campos existentes: ${erroConsulta.message}`);
-  }
-
-  const existentesPorCampo = new Map((existentes ?? []).map((linha) => [linha.campo, linha]));
-
   for (const { caminho, valor, fonte, confianca } of campos) {
     if (valor === undefined) continue;
 
-    const existente = existentesPorCampo.get(caminho);
+    const { error } = await supabase
+      .from('campo_extraido')
+      .upsert(
+        { empresa_id: empresaId, campo: caminho, valor, origem: fonte, confianca },
+        { onConflict: 'empresa_id,campo,origem' },
+      );
+    if (error) {
+      throw new Error(`Falha ao gravar o campo "${caminho}" (origem ${fonte}): ${error.message}`);
+    }
+  }
+}
 
-    if (!existente) {
-      const { error } = await supabase
-        .from('campo_extraido')
-        .upsert(
-          { empresa_id: empresaId, campo: caminho, valor, origem: fonte, confianca },
-          { onConflict: 'empresa_id,campo' },
-        );
-      if (error) {
-        throw new Error(`Falha ao gravar o campo "${caminho}": ${error.message}`);
-      }
+export interface LinhaCampoExtraido {
+  campo: string;
+  valor: unknown;
+  origem: TipoFonteDados;
+  confianca: Confianca;
+  editado_pelo_usuario?: boolean;
+}
+
+// Reduz várias linhas por campo (uma por origem) ao valor "efetivo" de cada
+// campo, aplicando a mesma regra de prioridade/confiança de deveSubstituirCampo
+// — mas agora na leitura, não mais na gravação. Uma edição do usuário na
+// revisão (editado_pelo_usuario=true) sempre vence: é a palavra final dele
+// sobre o próprio dado, independente da prioridade de origem. Em empate,
+// processa `linhas` na ordem em que vieram (normalmente por criado_em
+// crescente) para que a mais recente vença, como antes.
+export function calcularValoresEfetivos(
+  linhas: LinhaCampoExtraido[],
+): Map<string, LinhaCampoExtraido> {
+  const porCampo = new Map<string, LinhaCampoExtraido>();
+
+  for (const linha of linhas) {
+    const atual = porCampo.get(linha.campo);
+
+    if (!atual) {
+      porCampo.set(linha.campo, linha);
+      continue;
+    }
+    if (atual.editado_pelo_usuario && !linha.editado_pelo_usuario) continue;
+    if (linha.editado_pelo_usuario && !atual.editado_pelo_usuario) {
+      porCampo.set(linha.campo, linha);
       continue;
     }
 
     const substituir = deveSubstituirCampo(
-      caminho,
-      { fonte: existente.origem, confianca: existente.confianca },
-      { fonte, confianca },
+      linha.campo,
+      { fonte: atual.origem, confianca: atual.confianca },
+      { fonte: linha.origem, confianca: linha.confianca },
     );
-    if (!substituir) continue;
-
-    const { error } = await supabase
-      .from('campo_extraido')
-      .update({ valor, origem: fonte, confianca })
-      .eq('id', existente.id);
-    if (error) {
-      throw new Error(`Falha ao atualizar o campo "${caminho}": ${error.message}`);
-    }
+    if (substituir) porCampo.set(linha.campo, linha);
   }
+
+  return porCampo;
 }
 
 // Grava o resultado do estruturador em campo_extraido, aplicando a regra de
@@ -151,16 +166,18 @@ export async function sincronizarNomeESegmento(
 ): Promise<void> {
   const { data, error: erroConsulta } = await supabase
     .from('campo_extraido')
-    .select('campo, valor')
+    .select('campo, valor, origem, confianca, editado_pelo_usuario')
     .eq('empresa_id', empresaId)
-    .in('campo', ['nome', 'segmento']);
+    .in('campo', ['nome', 'segmento'])
+    .order('criado_em', { ascending: true });
 
   if (erroConsulta) {
     throw new Error(`Falha ao consultar nome/segmento: ${erroConsulta.message}`);
   }
 
-  const linhaNome = data?.find((linha) => linha.campo === 'nome');
-  const linhaSegmento = data?.find((linha) => linha.campo === 'segmento');
+  const efetivos = calcularValoresEfetivos(data ?? []);
+  const linhaNome = efetivos.get('nome');
+  const linhaSegmento = efetivos.get('segmento');
 
   if (!linhaNome && !linhaSegmento) return;
 
