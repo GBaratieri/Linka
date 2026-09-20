@@ -8,7 +8,7 @@
 
 ## 1. Missão
 
-Construir o **SiteLink**, uma plataforma web (MVP de TCC) que gera uma landing page para uma microempresa brasileira a partir de **um único link**: Instagram ou Google (Maps / perfil da empresa).
+Construir o **Linka**, uma plataforma web (MVP de TCC) que gera uma landing page para uma microempresa brasileira a partir de **um único link**: Instagram ou Google (Maps / perfil da empresa).
 
 Fluxo do usuário:
 
