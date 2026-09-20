@@ -108,3 +108,72 @@ Dois achados de limpeza (não corrigidos ainda, ficam para quando fizerem sentid
 padrão "pega usuário autenticado ou redireciona pro login" em 3 lugares (`novo/actions.ts` x2,
 `empresa/[id]/page.tsx`), e os tipos `Insert`/`Update` em `tipos-banco.ts` reescritos à mão em vez
 de derivados de `Row` via `Omit`/`Partial`.
+
+## Fase 2
+
+- **Extração síncrona em vez de polling**: o CLAUDE.md descreve "status persistido no banco e
+  polling no cliente". Implementamos a extração disparada de forma síncrona (aguardada durante o
+  carregamento de `/empresa/[id]`) em vez de um endpoint de status com polling no cliente — as duas
+  abordagens gravam `fonte_dados.status` da mesma forma, e a extração real (Places API) deve levar
+  no máximo alguns segundos. A lógica em si (`lib/conectores/normalizador.ts`) é uma função pura,
+  então trocar para polling/fila de verdade depois é uma mudança de infraestrutura na página, não
+  de lógica.
+- **Resolução de link do Google Maps**: em vez de tentar extrair um `place_id` de dentro da URL
+  (o parâmetro `data=` do Maps é opaco), extraímos o nome da empresa do próprio caminho da URL
+  (`/maps/place/Nome+Da+Empresa/...` ou `?q=...`) e usamos a Text Search (New) da Places API, que
+  já devolve os campos necessários num só request. Links curtos (`maps.app.goo.gl`, `g.page`,
+  `share.google`) são resolvidos antes via `lib/seguranca/ssrf.ts` (primeiro uso real desse
+  módulo, construído na Fase 1). **Isso não foi testado contra a API real** — precisa ser
+  confirmado com uma chave de verdade antes de considerar pronto para produção.
+- **Fotos do Google adiadas**: `GOOGLE_SHOW_PHOTOS=true` ligaria o campo `places.photos` no
+  `X-Goog-FieldMask`, mas as fotos da Places API (New) só vêm como uma referência opaca
+  (`photo.name`) que precisa de uma chamada separada ao endpoint de mídia (com a chave da API) e
+  depois um upload pro nosso Storage — a mesma esteira que já existe para as fotos do
+  Instagram/manual. Implementar isso agora seria antecipar uma funcionalidade atrás de uma flag que
+  o próprio `.env.example` já mantém desligada até revisão dos termos da API. `buscarDadosGoogle`
+  sempre devolve `fotos: null` por enquanto.
+- **Instagram passa pelo estruturador de IA; Manual não**: a bio do Instagram é texto livre — vira
+  `dadosBrutos` para o mesmo estruturador (7.1) usado pelo Google, que classifica segmento e separa
+  a descrição. Já o formulário manual tem campos explícitos e tipados (o usuário escolhe o
+  segmento, digita o telefone no campo certo etc.) — não faz sentido pedir pra uma IA "estruturar"
+  dado que já chegou estruturado; `lib/conectores/manual.ts` grava direto em `campo_extraido` com
+  `confianca: 'alta'`.
+- **Resolução de conflito por tabela de prioridade** (`lib/conectores/normalizador.ts`): dois
+  `Set`s (`CAMPOS_PRIORIDADE_GOOGLE`, `CAMPOS_PRIORIDADE_MANUAL_OU_INSTAGRAM`) implementam a regra
+  da seção 8 do CLAUDE.md. Fora desses campos, quem tiver maior confiança vence; empatado, a
+  extração mais nova vence — decisão de detalhe não coberta explicitamente pela regra do CLAUDE.md.
+- **Edição inline limitada a campos escalares**: a tela de revisão permite editar direto nome,
+  segmento, descrição, contatos e endereço (todos texto/select simples). Horários, serviços e
+  fotos aparecem como leitura nesta fase — construir editores ricos (adicionar/remover horário por
+  dia, reordenar fotos) é uma quantidade de UI própria que não parece justificada ainda para o MVP;
+  o usuário pode revisitar o formulário manual/Instagram para recolher esses dados se precisar.
+- **`empresa.nome`/`empresa.segmento` sincronizados a partir de `campo_extraido`**
+  (`sincronizarNomeESegmento`): sempre que `nome`/`segmento` são gravados ou editados em
+  `campo_extraido` (extração automática, formulário manual ou edição na revisão), as colunas da
+  tabela `empresa` são atualizadas também. `campo_extraido` continua sendo a fonte de verdade
+  completa (com origem e confiança); `empresa.nome`/`segmento` existem como um atalho para o resto
+  do app (painel, subdomínio, SEO) não precisar sempre juntar com `campo_extraido`.
+- **`fonte_dados.status` como máquina de estados da navegação**: `/empresa/[id]/page.tsx` decide
+  para onde mandar o usuário só olhando o status (`pendente` do Google dispara a extração;
+  `pendente` do manual manda pro formulário; `nao_configurado` manda pro fallback do Instagram;
+  `erro` mostra um botão de tentar de novo; `ok` manda pra revisão). Reaproveita a mesma coluna já
+  criada na Fase 1, sem precisar de um campo de "etapa atual" separado.
+- **`z.toJSONSchema()` para a ferramenta da Anthropic**: em vez de escrever o JSON Schema da
+  ferramenta (`tool_choice` forçado) à mão — duplicando o contrato que já existe como schema Zod —
+  geramos com o conversor nativo do Zod 4 (`lib/ia/estruturador.ts`). Uma fonte de verdade só; o
+  mesmo problema que motivou a decisão abaixo sobre `campo_extraido`.
+- **`campo_extraido` com tipos derivados, tabelas antigas mantidas como estão**: `tipos-banco.ts`
+  ganhou um tipo utilitário (`LinhaCompleta<Row, ChavesOpcionais>`) que deriva `Insert`/`Update` de
+  `Row` via `Omit`/`Partial`, usado só na tabela nova (`campo_extraido`). As quatro tabelas
+  anteriores (da Fase 1) continuam com os tipos escritos à mão — não foram tocadas para não mexer
+  em código já testado fora do que a Fase 2 pediu; migrar todas para o padrão novo fica como um
+  possível cleanup futuro.
+- **Formulário manual: horários em 7 linhas fixas, serviços em texto livre**: em vez de um editor
+  dinâmico de horários (adicionar/remover intervalos por dia) e uma lista dinâmica de serviços
+  (nome + descrição cada), o formulário tem 7 linhas fixas (seg–dom, cada uma com "abre"/"fecha"
+  opcionais) e um textarea de serviços (um por linha, sem descrição individual). Cobre o caso comum
+  sem a complexidade de gerenciar arrays dinâmicos no React; o usuário sempre pode refinar depois
+  editando os campos na revisão.
+- **Fixtures do Google**: 3 negócios fictícios (`padaria`, `oficina`, `moveis`) escolhidos de forma
+  determinística por um hash simples da URL, o suficiente para o critério de aceite ("pelo menos 3
+  negócios diferentes") sem precisar de uma tabela de URLs reais mapeadas a mão.
