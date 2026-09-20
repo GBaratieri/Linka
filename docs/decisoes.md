@@ -73,3 +73,38 @@ aqui e seguidas.
   `redirect()`. A server action (`app/novo/actions.ts`) só lê o `FormData`, resolve o usuário
   autenticado e decide para onde redirecionar. Isso permite testar a lógica de criação com um
   cliente Supabase mockado, sem precisar simular o mecanismo de `redirect()` do Next.js.
+
+## Revisão de código (pós-Fase 1)
+
+Revisão completa do código das Fases 0 e 1 (8 ângulos: linha a linha, invariantes/guards,
+rastreamento entre arquivos, reuso, simplificação, eficiência, altitude e conformidade com o
+`CLAUDE.md`). 8 problemas de corretude encontrados e corrigidos:
+
+- **`proxy.ts`**: os redirects (`/login`, `/novo`) criavam uma resposta nova sem copiar os cookies
+  que o Supabase pode ter renovado na mesma requisição (via `setAll`) — corrigido com um helper
+  `comCookiesDe` que copia os cookies antes de redirecionar.
+- **Checkbox de LGPD** (`lib/schemas/auth.ts`): checkbox desmarcado manda `null` (não `undefined`)
+  no `FormData`; `z.string().optional()` só cobre `undefined`, então o Zod mostrava um erro
+  genérico em inglês em vez da mensagem em pt-BR. Trocado para `.nullish()`.
+- **`criarEmpresa.ts`**: o erro do insert em `evento_pesquisa` (métrica do TCC) não era checado —
+  agora é logado (sem bloquear o fluxo, já que é telemetria, não dado essencial do usuário).
+- **`criarEmpresa.ts`**: se o insert de `fonte_dados` falhasse depois do de `empresa`, a empresa
+  ficava órfã para sempre — agora a empresa é removida (rollback manual) nesse caso.
+- **`acaoManual`** (`app/novo/actions.ts`): em caso de erro, só redirecionava de volta pro `/novo`
+  sem nenhuma mensagem. Agora segue o mesmo padrão de `useActionState` do `acaoLink`, mostrando o
+  erro no formulário.
+- **`ssrf.ts`**: o allowlist aceitava qualquer caminho em `google.com`/`www.google.com`, mas o
+  roteador só considera válido um link desses hosts quando o caminho começa com `/maps`. Adicionada
+  `caminhoPermitidoParaHost`, replicando a mesma regra (com comentário apontando a necessidade de
+  manter as duas em sincronia até uma futura unificação).
+- **`auth.ts`**: schemas de cadastro/login não tinham limite máximo de tamanho em nome/e-mail/senha
+  (diferente do link, que já tinha um cap de 2048 caracteres). Adicionados `.max()` em todos os
+  campos de texto livre.
+- **`empresa/[id]/page.tsx`**: o `id` da URL ia direto pra query sem validar formato, e o erro do
+  Supabase era descartado (só verificava se a empresa veio vazia). Adicionada validação de formato
+  UUID antes de consultar, e o erro da consulta agora também é checado.
+
+Dois achados de limpeza (não corrigidos ainda, ficam para quando fizerem sentido): duplicação do
+padrão "pega usuário autenticado ou redireciona pro login" em 3 lugares (`novo/actions.ts` x2,
+`empresa/[id]/page.tsx`), e os tipos `Insert`/`Update` em `tipos-banco.ts` reescritos à mão em vez
+de derivados de `Row` via `Omit`/`Partial`.
