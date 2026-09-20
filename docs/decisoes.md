@@ -306,7 +306,73 @@ pelo Google, depois adiciona o Instagram) para o verificador ter o que comparar.
   fonte de novo não traria dado novo para comparar; `lib/conectores/adicionarFonte.ts` rejeita nesse
   caso. Depois de adicionar, o fluxo volta para `/empresa/[id]`, que já sabe processar a fonte mais
   recente pendente (nenhuma mudança precisou ser feita ali).
-- **Comparação de `horarios` por igualdade estrutural simples (`JSON.stringify`)**: sensível à ordem
-  dos dias dentro do array. Suficiente para o caso comum (mesma ordem de extração), mas uma futura
-  divergência só de ordem (sem diferença real de horário) apontaria um falso positivo — aceitável
-  por ora, documentado aqui para não ser confundido com um bug se aparecer.
+- **Comparação de `horarios` por igualdade estrutural simples (`JSON.stringify`)**: originalmente
+  sensível à ordem dos itens do array — corrigido na revisão de código abaixo ("Revisão de código
+  do retrofit").
+
+## Revisão de código do retrofit (pós-CLAUDE.md v2)
+
+Revisão completa do diff do retrofit (10 ângulos, mesmo processo das revisões anteriores). 10
+achados corrigidos (6 confirmados por leitura direta do código + 4 plausíveis):
+
+- **Instagram nunca registrava `extracao_concluida` em modo mock**: o insert em `evento_produto`
+  só acontecia `if (uso !== null)`, e `uso` é sempre `null` sob `USE_MOCKS=true` (o padrão) — o
+  Google, em compensação, sempre registrava. Corrigido para seguir o mesmo padrão do Google
+  (`instagram.ts`): grava sempre, com ou sem dado de custo.
+- **Confirmar a revisão sem reescrever nada nunca travava a escolha do usuário**: o formulário já
+  vem pré-preenchido com o valor efetivo, então `novoValor === valorAtual` e o campo nunca ganhava
+  `editado_pelo_usuario=true` — o que, combinado com o Google sempre prevalecendo em
+  endereço/telefone/horário, permitia que uma segunda fonte (Google) sobrescrevesse silenciosamente
+  um dado que o dono preencheu à mão. Corrigido: `confirmarRevisao` agora sempre grava (com
+  `editado_pelo_usuario=true`) todo campo não deixado em branco, mudando o texto ou não — confirmar
+  a revisão é a palavra final do usuário sobre o valor mostrado, não só sobre uma edição de texto.
+  Campos deixados em branco continuam sem travar (uma fonte futura ainda pode preenchê-los). O
+  evento `campo_editado` (esforço de correção, seção 9) continua só disparando quando o texto muda
+  de verdade.
+- **Aviso de divergência nunca sumia**: `encontrarDivergencias` só excluía a linha que o usuário
+  editou, deixando as outras linhas (ainda discordantes entre si) continuarem acionando o aviso.
+  Corrigido: quando qualquer linha de um campo tem `editado_pelo_usuario=true`, o campo inteiro sai
+  da comparação.
+- **Custo de IA perdido quando a chamada de retry lança erro** (não só quando devolve saída
+  inválida): `estruturarComIA` reestruturado com `try/finally` para sempre reportar o uso acumulado
+  até ali, mesmo que a segunda tentativa lance uma exceção (rede, limite de taxa) em vez de só
+  devolver um schema inválido.
+- **Corrida ao adicionar uma segunda fonte**: a checagem "já existe uma fonte desse tipo?" antes do
+  insert tinha uma janela de corrida (dois envios simultâneos podiam passar pela checagem antes de
+  qualquer um dos dois inserir) e descartava o erro da própria consulta. Adicionada uma constraint
+  única `fonte_dados(empresa_id, tipo)` no banco (migração
+  `20260920140000_fonte_dados_unica_por_tipo.sql`); `adicionarFonte.ts` agora tenta inserir direto e
+  trata a violação da constraint (código Postgres `23505`) como o erro esperado — sem checagem
+  prévia, sem corrida.
+- **Confirmar a revisão marcava linhas divergentes/perdedoras como confirmadas**: o
+  `.update({confirmado_pelo_usuario: true}).eq('empresa_id', ...)` (não tocado pelo retrofit
+  original) passou a atingir todas as origens de cada campo assim que `campo_extraido` virou
+  multi-origem. Corrigido: marca como confirmadas só as linhas que são efetivamente o valor atual
+  de cada campo (recalculado depois das edições), via `.in('id', idsEfetivos)`.
+- **Migração da Fase 1 editada em cima em vez de uma migração nova**: o rename
+  `evento_pesquisa`→`evento_produto` e a coluna `usuario.papel` editavam
+  `20260919120000_esquema_dominio.sql` diretamente, dependendo da suposição de que ela nunca tinha
+  sido aplicada a um Supabase real — e a regra 5 nova do CLAUDE.md pede confirmação explícita antes
+  de qualquer migração que altere o que já foi entregue. Revertido: a migração original volta ao
+  estado de antes do retrofit, e as duas mudanças passam a ser uma migração própria
+  (`20260920130000_evento_produto_e_usuario_papel.sql`), aplicada por `ALTER` em cima do esquema
+  original.
+- **Colisão entre duas gravações em `origem='manual'`** (uma edição na revisão e uma segunda fonte
+  manual complementar, via `adicionarFonte.ts`): analisando com cuidado, isso não é perda silenciosa
+  de dado — como as duas gravam no mesmo slot `origem='manual'`, a mais recente sempre vence de
+  forma consistente (a mesma regra de "a ação mais recente do usuário vale" que já se aplica a duas
+  edições seguidas na própria revisão). Documentado como comportamento intencional (comentário em
+  `lib/conectores/manual.ts`), não um caso especial a corrigir.
+- **Comparação de horário sensível à ordem do array**: `encontrarDivergencias` comparava `horarios`
+  com `JSON.stringify` direto, que depende da ordem dos itens — o Google sempre devolve os dias em
+  ordem, mas um horário extraído por IA a partir da bio do Instagram não tem essa garantia.
+  Corrigido: ordena os itens do array antes de comparar (`normalizarValor`), então duas listas com
+  os mesmos horários em ordem diferente não são mais tratadas como divergência.
+
+Dois achados plausíveis ficaram fora desse ciclo de correção por serem estruturais/de design (não
+bugs pontuais): unificar as quatro listas hardcoded de campos (`CAMPOS_COMPARAVEIS`,
+`CAMPOS_PRIORIDADE_*`, `CAMPOS_EDITAVEIS`, `CAMPOS_FORMULARIO`) num registro só, e tornar
+`/empresa/[id]/page.tsx` ciente de que uma empresa pode ter mais de uma `fonte_dados` (hoje
+funciona por já pegar sempre a mais recente, mas sem um mecanismo explícito para isso). Ficam para
+quando fizerem mais sentido — o segundo, em especial, junto de um redesenho maior do fluxo de
+onboarding quando a Fase 4+ da v2 chegar.
