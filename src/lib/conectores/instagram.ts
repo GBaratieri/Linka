@@ -3,6 +3,7 @@ import type { Database } from '@/lib/supabase/tipos-banco';
 import type { FormularioInstagramInput } from '@/lib/schemas/manual';
 import { estruturarEmpresa } from '@/lib/ia/estruturador';
 import { gravarCamposExtraidos } from './normalizador';
+import { payloadComUso, type UsoTokens } from '@/lib/metricas/custos';
 
 export interface DadosBrutosInstagram {
   handle: string | null;
@@ -61,13 +62,29 @@ export async function processarFallbackInstagram(
   };
 
   try {
-    const resultado = await estruturarEmpresa({ origem: 'instagram', dadosBrutos });
+    let usoIA: UsoTokens | null = null;
+    const resultado = await estruturarEmpresa({
+      origem: 'instagram',
+      dadosBrutos,
+      aoUsarIA: (uso) => {
+        usoIA = uso;
+      },
+    });
     await gravarCamposExtraidos(supabase, empresaId, resultado);
 
     await supabase
       .from('fonte_dados')
       .update({ status: 'ok', bruto: dadosBrutos, coletado_em: new Date().toISOString() })
       .eq('id', fonteId);
+
+    const uso: UsoTokens | null = usoIA;
+    if (uso !== null) {
+      await supabase.from('evento_produto').insert({
+        empresa_id: empresaId,
+        tipo: 'extracao_concluida',
+        payload: payloadComUso({ fonte: 'instagram' }, uso),
+      });
+    }
 
     return { sucesso: true };
   } catch (erro) {

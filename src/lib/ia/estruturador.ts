@@ -8,10 +8,16 @@ import {
 } from '@/lib/schemas/empresa';
 import type { DadosBrutosGoogle } from '@/lib/conectores/google';
 import type { DadosBrutosInstagram } from '@/lib/conectores/instagram';
+import type { UsoTokens } from '@/lib/metricas/custos';
 
 export interface EntradaEstruturador {
   origem: 'google' | 'instagram';
   dadosBrutos: DadosBrutosGoogle | DadosBrutosInstagram;
+  // Chamado uma vez com os tokens consumidos quando USE_MOCKS=false (nunca
+  // no modo mock, que não gera uso real) — quem chama decide se/como
+  // registrar o custo em evento_produto (seção 8.6 do CLAUDE.md). Mantido
+  // opcional para não quebrar os chamadores/testes que não precisam disso.
+  aoUsarIA?: (uso: UsoTokens) => void;
 }
 
 const usarMocks = () => process.env.USE_MOCKS !== 'false';
@@ -53,8 +59,11 @@ async function estruturarComIA(entrada: EntradaEstruturador): Promise<ResultadoE
 
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-  const chamar = () =>
-    client.messages.create({
+  let tokensEntrada = 0;
+  let tokensSaida = 0;
+
+  const chamar = async () => {
+    const resposta = await client.messages.create({
       model: modelo,
       max_tokens: 4096,
       system: PROMPT_SISTEMA,
@@ -67,6 +76,10 @@ async function estruturarComIA(entrada: EntradaEstruturador): Promise<ResultadoE
       tools: [ferramentaEstruturador()],
       tool_choice: { type: 'tool', name: NOME_FERRAMENTA },
     });
+    tokensEntrada += resposta.usage.input_tokens;
+    tokensSaida += resposta.usage.output_tokens;
+    return resposta;
+  };
 
   const extrairResultado = (resposta: Anthropic.Message) => {
     const usoDeFerramenta = resposta.content.find(
@@ -80,6 +93,10 @@ async function estruturarComIA(entrada: EntradaEstruturador): Promise<ResultadoE
     // Uma nova tentativa se a saída vier inválida (comportamento da IA, seção 7 do CLAUDE.md).
     resultado = extrairResultado(await chamar());
   }
+
+  // Reporta o uso mesmo quando a extração falhou nas duas tentativas — os
+  // tokens foram consumidos (e cobrados) de qualquer forma.
+  entrada.aoUsarIA?.({ modelo, tokensEntrada, tokensSaida });
 
   if (!resultado.success) {
     throw new Error(
