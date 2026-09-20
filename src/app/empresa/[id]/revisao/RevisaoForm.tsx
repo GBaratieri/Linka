@@ -91,8 +91,10 @@ export function RevisaoForm({ empresaId, campos }: { empresaId: string; campos: 
               </div>
 
               {tipo === 'select' ? (
-                <select id={campo} name={campo} defaultValue={valor} className={CLASSE_INPUT}>
-                  <option value="">Selecione...</option>
+                <select id={campo} name={campo} defaultValue={valor} required className={CLASSE_INPUT}>
+                  <option value="" disabled>
+                    Selecione...
+                  </option>
                   <option value="servicos">Serviços</option>
                   <option value="comercio">Comércio</option>
                   <option value="alimentacao">Alimentação</option>
@@ -112,6 +114,7 @@ export function RevisaoForm({ empresaId, campos }: { empresaId: string; campos: 
                   name={campo}
                   type="text"
                   defaultValue={valor}
+                  required={campo === 'nome'}
                   className={CLASSE_INPUT}
                 />
               )}
@@ -127,8 +130,8 @@ export function RevisaoForm({ empresaId, campos }: { empresaId: string; campos: 
           {horarios?.length ? (
             <CampoSomenteLeitura rotulo="Horário de funcionamento">
               <ul className="text-gray-600 dark:text-gray-400">
-                {horarios.map((horario) => (
-                  <li key={horario.dia}>
+                {horarios.map((horario, indice) => (
+                  <li key={`${horario.dia}-${indice}`}>
                     {horario.dia}: {horario.abre} – {horario.fecha}
                   </li>
                 ))}

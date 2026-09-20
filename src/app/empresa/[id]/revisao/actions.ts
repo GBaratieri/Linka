@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation';
 import { criarClienteServidor } from '@/lib/supabase/server';
 import { sincronizarNomeESegmento } from '@/lib/conectores/normalizador';
+import { segmentoSchema } from '@/lib/schemas/empresa';
 
 export interface EstadoRevisao {
   erro?: string;
@@ -30,6 +31,18 @@ export async function confirmarRevisao(
 ): Promise<EstadoRevisao> {
   if (formData.get('titularidade') !== 'on') {
     return { erro: 'Confirme que você é dono ou responsável pelo negócio para continuar.' };
+  }
+
+  // Nome e segmento são a identidade da empresa (usados em subdomínio/SEO nas
+  // próximas fases) — mesmo com o `required` no formulário, valida de novo
+  // aqui para não depender só do HTML (uma requisição adulterada poderia
+  // mandar um valor vazio ou um segmento fora do enum).
+  const nomeForm = String(formData.get('nome') ?? '').trim();
+  if (!nomeForm) {
+    return { erro: 'Informe o nome da empresa antes de confirmar.' };
+  }
+  if (!segmentoSchema.safeParse(formData.get('segmento')).success) {
+    return { erro: 'Selecione um ramo válido antes de confirmar.' };
   }
 
   const supabase = await criarClienteServidor();
@@ -76,7 +89,12 @@ export async function confirmarRevisao(
       .insert({ empresa_id: empresaId, tipo: 'campo_editado', payload: { campo } });
   }
 
-  await sincronizarNomeESegmento(supabase, empresaId);
+  try {
+    await sincronizarNomeESegmento(supabase, empresaId);
+  } catch (erro) {
+    console.error('Falha ao sincronizar nome/segmento após revisão:', erro);
+    return { erro: 'Não foi possível salvar as alterações agora. Tente novamente em instantes.' };
+  }
   await supabase
     .from('campo_extraido')
     .update({ confirmado_pelo_usuario: true })

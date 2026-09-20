@@ -41,4 +41,11 @@ describe('RevisaoForm', () => {
     const checkbox = screen.getByLabelText(/Sou dono ou responsável/);
     expect(checkbox).toBeRequired();
   });
+
+  it('exige nome e ramo preenchidos, para não desincronizar empresa.nome/segmento', () => {
+    render(<RevisaoForm empresaId="empresa-1" campos={CAMPOS} />);
+
+    expect(screen.getByLabelText('Nome da empresa')).toBeRequired();
+    expect(screen.getByLabelText('Ramo')).toBeRequired();
+  });
 });
