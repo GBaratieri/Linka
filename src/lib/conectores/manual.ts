@@ -4,10 +4,18 @@ import type { FormularioManualInput } from '@/lib/schemas/manual';
 import { gravarCampos, sincronizarNomeESegmento, type CampoParaGravar } from './normalizador';
 
 // Formulário manual já é totalmente estruturado pelo usuário — sem AI
-// estruturadora aqui, direto para campo_extraido com confiança máxima.
-// Usa gravarCampos (mesma checagem de linha existente do estruturador de
-// IA) em vez de inserir direto, para não duplicar linhas se o usuário
-// reenviar o formulário (duplo clique, "voltar" do navegador etc.).
+// estruturadora aqui, direto para campo_extraido com confiança máxima. Usa
+// gravarCampos (upsert por origem, ver normalizador.ts) em vez de inserir
+// direto, para não duplicar linhas se o usuário reenviar o formulário
+// (duplo clique, "voltar" do navegador etc.) — a constraint única do banco
+// faz a gravação ser idempotente por (empresa_id, campo, origem).
+//
+// Nota: se o usuário já editou um campo na revisão (origem 'manual',
+// editado_pelo_usuario=true) e depois complementa a empresa com uma segunda
+// fonte manual (ver adicionarFonte.ts), esta função grava no mesmo slot
+// origem='manual' e o valor mais recente vence — é a mesma regra de
+// "a ação mais recente do usuário é a que vale" que já se aplica a duas
+// edições seguidas na própria revisão, não um caso especial.
 export async function gravarDadosManual(
   supabase: SupabaseClient<Database>,
   empresaId: string,
