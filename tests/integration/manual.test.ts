@@ -15,26 +15,45 @@ const HORARIOS_VAZIOS: FormularioManualInput['horarios'] = [
 ];
 
 function criarClienteMock() {
-  const camposInseridos: Array<{ campo: string; valor: unknown }> = [];
+  const linhas: Array<{
+    id: string;
+    campo: string;
+    valor: unknown;
+    origem: string;
+    confianca: string;
+  }> = [];
   const chamadasEmpresaUpdate: unknown[] = [];
   const chamadasFonteUpdate: unknown[] = [];
+  let proximoId = 1;
 
   const from = vi.fn((tabela: string) => {
     if (tabela === 'campo_extraido') {
       return {
-        insert: vi.fn(async (valores: { campo: string; valor: unknown }) => {
-          camposInseridos.push(valores);
-          return { data: null, error: null };
-        }),
+        upsert: vi.fn(
+          async (valores: { campo: string; valor: unknown; origem: string; confianca: string }) => {
+            linhas.push({ id: String(proximoId++), ...valores });
+            return { data: null, error: null };
+          },
+        ),
+        update: vi.fn((valores: { valor: unknown; origem: string; confianca: string }) => ({
+          eq: vi.fn(async (_coluna: string, id: string) => {
+            const linha = linhas.find((l) => l.id === id);
+            if (linha) Object.assign(linha, valores);
+            return { data: null, error: null };
+          }),
+        })),
         select: vi.fn(() => ({
-          eq: vi.fn(() => ({
-            in: vi.fn(async () => ({
-              data: camposInseridos
-                .filter((c) => c.campo === 'nome' || c.campo === 'segmento')
-                .map((c) => ({ campo: c.campo, valor: c.valor })),
-              error: null,
-            })),
-          })),
+          eq: vi.fn(() => {
+            const promessa = Promise.resolve({ data: [...linhas], error: null });
+            return Object.assign(promessa, {
+              in: vi.fn(async () => ({
+                data: linhas
+                  .filter((l) => l.campo === 'nome' || l.campo === 'segmento')
+                  .map((l) => ({ campo: l.campo, valor: l.valor })),
+                error: null,
+              })),
+            });
+          }),
         })),
       };
     }
@@ -66,7 +85,7 @@ function criarClienteMock() {
 
   return {
     cliente: { from } as unknown as SupabaseClient<Database>,
-    camposInseridos,
+    linhas,
     chamadasEmpresaUpdate,
     chamadasFonteUpdate,
   };
@@ -74,8 +93,7 @@ function criarClienteMock() {
 
 describe('gravarDadosManual', () => {
   it('grava só os campos preenchidos, com origem manual e confiança alta', async () => {
-    const { cliente, camposInseridos, chamadasEmpresaUpdate, chamadasFonteUpdate } =
-      criarClienteMock();
+    const { cliente, linhas, chamadasEmpresaUpdate, chamadasFonteUpdate } = criarClienteMock();
 
     const dados: FormularioManualInput = {
       nome: 'Loja Center Móveis',
@@ -97,7 +115,7 @@ describe('gravarDadosManual', () => {
       'https://exemplo.com/foto1.jpg',
     ]);
 
-    const camposPorNome = Object.fromEntries(camposInseridos.map((c) => [c.campo, c.valor]));
+    const camposPorNome = Object.fromEntries(linhas.map((c) => [c.campo, c.valor]));
 
     expect(camposPorNome.nome).toBe('Loja Center Móveis');
     expect(camposPorNome.segmento).toBe('comercio');
@@ -116,7 +134,7 @@ describe('gravarDadosManual', () => {
   });
 
   it('não grava campo_extraido para campos deixados em branco', async () => {
-    const { cliente, camposInseridos } = criarClienteMock();
+    const { cliente, linhas } = criarClienteMock();
 
     const dados: FormularioManualInput = {
       nome: 'Empresa Simples',
@@ -134,7 +152,32 @@ describe('gravarDadosManual', () => {
 
     await gravarDadosManual(cliente, 'empresa-2', 'fonte-2', dados, []);
 
-    const camposGravados = camposInseridos.map((c) => c.campo);
+    const camposGravados = linhas.map((c) => c.campo);
     expect(camposGravados).toEqual(['nome', 'segmento']);
+  });
+
+  it('não duplica linhas em campo_extraido ao reenviar o mesmo formulário', async () => {
+    const { cliente, linhas } = criarClienteMock();
+
+    const dados: FormularioManualInput = {
+      nome: 'Salão da Ana',
+      segmento: 'servicos',
+      descricao: null,
+      telefone: '5551988887777',
+      whatsapp: null,
+      email: null,
+      instagram: null,
+      site: null,
+      endereco: null,
+      servicos: null,
+      horarios: HORARIOS_VAZIOS,
+    };
+
+    // Simula um reenvio (duplo clique, "voltar" do navegador etc.).
+    await gravarDadosManual(cliente, 'empresa-3', 'fonte-3', dados, []);
+    await gravarDadosManual(cliente, 'empresa-3', 'fonte-3', dados, []);
+
+    const camposGravados = linhas.map((c) => c.campo).sort();
+    expect(camposGravados).toEqual(['contato.telefone', 'nome', 'segmento']);
   });
 });

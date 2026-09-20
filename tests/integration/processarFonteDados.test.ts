@@ -28,7 +28,7 @@ function criarClienteMock() {
             });
           }),
         })),
-        insert: vi.fn(async (valores: { empresa_id: string; campo: string; valor: unknown }) => {
+        upsert: vi.fn(async (valores: { empresa_id: string; campo: string; valor: unknown }) => {
           const lista = camposPorEmpresa.get(valores.empresa_id) ?? [];
           lista.push({ id: String(proximoId++), campo: valores.campo, valor: valores.valor });
           camposPorEmpresa.set(valores.empresa_id, lista);
@@ -87,7 +87,11 @@ describe('processarFonteDados (fluxo completo, USE_MOCKS=true)', () => {
         criarClienteMock();
       const empresaId = `empresa-${url}`;
 
-      await processarFonteDados(cliente, empresaId, { id: 'fonte-1', tipo: 'google', url });
+      const status = await processarFonteDados(cliente, empresaId, {
+        id: 'fonte-1',
+        tipo: 'google',
+        url,
+      });
 
       const campos = camposPorEmpresa.get(empresaId) ?? [];
       const camposPorNome = Object.fromEntries(campos.map((c) => [c.campo, c.valor]));
@@ -98,6 +102,7 @@ describe('processarFonteDados (fluxo completo, USE_MOCKS=true)', () => {
       // Sem WhatsApp nas fixtures do Google: nunca inventar.
       expect(camposPorNome['contato.whatsapp']).toBeUndefined();
 
+      expect(status).toBe('ok');
       expect(chamadasFonteUpdate[0]).toMatchObject({ status: 'ok' });
       expect(eventosRegistrados.some((e) => e.tipo === 'extracao_concluida')).toBe(true);
     },
@@ -121,12 +126,13 @@ describe('processarFonteDados (fluxo completo, USE_MOCKS=true)', () => {
   it('marca a fonte do Instagram como não configurada sem tentar extrair nada', async () => {
     const { cliente, chamadasFonteUpdate, camposPorEmpresa } = criarClienteMock();
 
-    await processarFonteDados(cliente, 'empresa-instagram', {
+    const status = await processarFonteDados(cliente, 'empresa-instagram', {
       id: 'fonte-2',
       tipo: 'instagram',
       url: 'https://instagram.com/empresa',
     });
 
+    expect(status).toBe('nao_configurado');
     expect(chamadasFonteUpdate[0]).toEqual({ status: 'nao_configurado' });
     expect(camposPorEmpresa.get('empresa-instagram') ?? []).toHaveLength(0);
   });
@@ -134,12 +140,13 @@ describe('processarFonteDados (fluxo completo, USE_MOCKS=true)', () => {
   it('não faz nada para uma fonte manual (o formulário grava direto)', async () => {
     const { cliente, chamadasFonteUpdate } = criarClienteMock();
 
-    await processarFonteDados(cliente, 'empresa-manual', {
+    const status = await processarFonteDados(cliente, 'empresa-manual', {
       id: 'fonte-3',
       tipo: 'manual',
       url: null,
     });
 
+    expect(status).toBe('pendente');
     expect(chamadasFonteUpdate).toHaveLength(0);
   });
 });

@@ -56,7 +56,12 @@ export async function salvarManual(
     return { erro: uploadResultado.erro };
   }
 
-  await gravarDadosManual(supabase, empresaId, fonteId, resultado.data, uploadResultado.urls);
+  try {
+    await gravarDadosManual(supabase, empresaId, fonteId, resultado.data, uploadResultado.urls);
+  } catch (erro) {
+    console.error('Falha ao gravar dados do formulário manual:', erro);
+    return { erro: 'Não foi possível salvar os dados agora. Tente novamente em instantes.' };
+  }
 
   redirect(`/empresa/${empresaId}/revisao`);
 }
