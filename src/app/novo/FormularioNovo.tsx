@@ -11,11 +11,15 @@ const SUGESTOES = [
 ];
 
 export function FormularioNovo() {
-  const [estado, formAction, pendente] = useActionState(acaoLink, estadoInicial);
+  const [estadoLink, formActionLink, pendenteLink] = useActionState(acaoLink, estadoInicial);
+  const [estadoManual, formActionManual, pendenteManual] = useActionState(
+    acaoManual,
+    estadoInicial,
+  );
 
   return (
     <div className="flex flex-col gap-6">
-      <form action={formAction} className="flex flex-col gap-3">
+      <form action={formActionLink} className="flex flex-col gap-3">
         <label htmlFor="link" className="text-sm font-medium">
           Cole o link do Instagram ou do Google da sua empresa
         </label>
@@ -38,23 +42,25 @@ export function FormularioNovo() {
             </span>
           ))}
         </div>
-        {estado.erro ? <p className="text-sm text-red-600">{estado.erro}</p> : null}
+        {estadoLink.erro ? <p className="text-sm text-red-600">{estadoLink.erro}</p> : null}
         <button
           type="submit"
-          disabled={pendente}
+          disabled={pendenteLink}
           className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-white dark:text-gray-900"
         >
-          {pendente ? 'Enviando...' : 'Continuar'}
+          {pendenteLink ? 'Enviando...' : 'Continuar'}
         </button>
       </form>
 
-      <form action={acaoManual} className="text-center">
+      <form action={formActionManual} className="flex flex-col items-center gap-2 text-center">
         <button
           type="submit"
-          className="text-sm text-gray-600 underline underline-offset-2 dark:text-gray-400"
+          disabled={pendenteManual}
+          className="text-sm text-gray-600 underline underline-offset-2 disabled:opacity-50 dark:text-gray-400"
         >
-          Não tenho link, quero preencher manualmente
+          {pendenteManual ? 'Enviando...' : 'Não tenho link, quero preencher manualmente'}
         </button>
+        {estadoManual.erro ? <p className="text-sm text-red-600">{estadoManual.erro}</p> : null}
       </form>
     </div>
   );

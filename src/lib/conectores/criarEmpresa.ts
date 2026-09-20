@@ -33,14 +33,23 @@ async function criarEmpresaComFonte(
   });
 
   if (erroFonte) {
+    // Sem isso, a empresa fica órfã (sem fonte_dados) e cada nova tentativa
+    // do usuário cria outra órfã, já que o insert acima já foi confirmado.
+    await supabase.from('empresa').delete().eq('id', empresa.id);
     return { sucesso: false, erro: ERRO_GENERICO_FONTE };
   }
 
-  await supabase.from('evento_pesquisa').insert({
+  const { error: erroEvento } = await supabase.from('evento_pesquisa').insert({
     empresa_id: empresa.id,
     tipo: 'link_colado',
     payload: { fonte: tipo, url },
   });
+
+  if (erroEvento) {
+    // Métrica de pesquisa (seção 9 do CLAUDE.md), não deve bloquear o
+    // usuário — mas a falha precisa ficar visível em algum lugar.
+    console.error('Falha ao registrar evento_pesquisa "link_colado":', erroEvento);
+  }
 
   return { sucesso: true, empresaId: empresa.id };
 }

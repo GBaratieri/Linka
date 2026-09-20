@@ -35,7 +35,7 @@ export async function acaoLink(
   redirect(`/empresa/${resultado.empresaId}`);
 }
 
-export async function acaoManual(): Promise<void> {
+export async function acaoManual(): Promise<EstadoNovo> {
   const supabase = await criarClienteServidor();
   const {
     data: { user },
@@ -48,7 +48,7 @@ export async function acaoManual(): Promise<void> {
   const resultado = await criarEmpresaManual(supabase, user.id);
 
   if (!resultado.sucesso) {
-    redirect('/novo');
+    return { erro: resultado.erro };
   }
 
   redirect(`/empresa/${resultado.empresaId}`);

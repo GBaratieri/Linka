@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@/lib/supabase/tipos-banco';
 import { criarEmpresaComLink, criarEmpresaManual } from '@/lib/conectores/criarEmpresa';
@@ -10,11 +10,13 @@ interface ErroFake {
 interface Comportamento {
   empresa?: { id?: string; erro?: ErroFake };
   fonteDados?: { erro?: ErroFake };
+  eventoPesquisa?: { erro?: ErroFake };
 }
 
 function criarClienteMock(comportamento: Comportamento = {}) {
   const chamadas: {
     empresaInsert?: unknown;
+    empresaDelete?: unknown;
     fonteDadosInsert?: unknown;
     eventoPesquisaInsert?: unknown;
   } = {};
@@ -35,6 +37,12 @@ function criarClienteMock(comportamento: Comportamento = {}) {
             })),
           };
         }),
+        delete: vi.fn(() => ({
+          eq: vi.fn(async (_coluna: string, valor: unknown) => {
+            chamadas.empresaDelete = valor;
+            return { data: null, error: null };
+          }),
+        })),
       };
     }
 
@@ -54,6 +62,9 @@ function criarClienteMock(comportamento: Comportamento = {}) {
       return {
         insert: vi.fn(async (valores: unknown) => {
           chamadas.eventoPesquisaInsert = valores;
+          if (comportamento.eventoPesquisa?.erro) {
+            return { data: null, error: comportamento.eventoPesquisa.erro };
+          }
           return { data: null, error: null };
         }),
       };
@@ -116,8 +127,11 @@ describe('criarEmpresaComLink', () => {
     });
   });
 
-  it('retorna um erro amigável quando o registro da fonte de dados falha', async () => {
-    const { cliente } = criarClienteMock({ fonteDados: { erro: { message: 'falhou' } } });
+  it('remove a empresa recém-criada quando o registro da fonte de dados falha', async () => {
+    const { cliente, chamadas } = criarClienteMock({
+      empresa: { id: 'empresa-orfa' },
+      fonteDados: { erro: { message: 'falhou' } },
+    });
 
     const resultado = await criarEmpresaComLink(
       cliente,
@@ -129,10 +143,34 @@ describe('criarEmpresaComLink', () => {
       sucesso: false,
       erro: 'Não foi possível registrar a fonte de dados. Tente novamente.',
     });
+    expect(chamadas.empresaDelete).toBe('empresa-orfa');
+  });
+
+  it('não falha a operação quando o registro do evento de pesquisa falha, mas registra o erro', async () => {
+    const consoleErroSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { cliente } = criarClienteMock({
+      empresa: { id: 'empresa-abc' },
+      eventoPesquisa: { erro: { message: 'falhou' } },
+    });
+
+    const resultado = await criarEmpresaComLink(
+      cliente,
+      'usuario-1',
+      'https://instagram.com/empresa',
+    );
+
+    expect(resultado).toEqual({ sucesso: true, empresaId: 'empresa-abc' });
+    expect(consoleErroSpy).toHaveBeenCalled();
+
+    consoleErroSpy.mockRestore();
   });
 });
 
 describe('criarEmpresaManual', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('cria a empresa com uma fonte de dados do tipo manual, sem URL', async () => {
     const { cliente, chamadas } = criarClienteMock({ empresa: { id: 'empresa-manual' } });
 
