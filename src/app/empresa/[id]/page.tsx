@@ -38,7 +38,7 @@ export default async function EmpresaPage({ params }: PageProps<'/empresa/[id]'>
     .eq('empresa_id', id)
     .order('criado_em', { ascending: false })
     .limit(1)
-    .single();
+    .maybeSingle();
 
   if (erroFonte || !fonte) {
     notFound();
@@ -48,18 +48,13 @@ export default async function EmpresaPage({ params }: PageProps<'/empresa/[id]'>
 
   // Extração síncrona: com USE_MOCKS=true é instantânea; com a Places API
   // real deve levar no máximo alguns segundos. Ver docs/decisoes.md,
-  // "Extração síncrona em vez de polling".
-  if (status === 'pendente' && fonte.tipo === 'google') {
-    await processarFonteDados(supabase, id, fonte);
-    const { data: fonteAtualizada } = await supabase
-      .from('fonte_dados')
-      .select('status')
-      .eq('id', fonte.id)
-      .single();
-    status = fonteAtualizada?.status ?? status;
-  } else if (status === 'pendente' && fonte.tipo === 'instagram') {
-    await processarFonteDados(supabase, id, fonte);
-    status = 'nao_configurado';
+  // "Extração síncrona em vez de polling". processarFonteDados devolve o
+  // status final diretamente — evita uma segunda consulta ao banco (que
+  // poderia falhar/atrasar e deixar "status" preso no valor antigo
+  // "pendente", mascarando um erro real já gravado) e evita repetir aqui a
+  // suposição de qual status o Instagram sempre resulta.
+  if (status === 'pendente' && (fonte.tipo === 'google' || fonte.tipo === 'instagram')) {
+    status = await processarFonteDados(supabase, id, fonte);
   }
 
   if (status === 'erro') {
