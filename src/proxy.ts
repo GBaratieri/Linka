@@ -37,16 +37,27 @@ export async function proxy(request: NextRequest) {
   if (!user && rotaProtegida) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
-    return NextResponse.redirect(url);
+    return comCookiesDe(response, NextResponse.redirect(url));
   }
 
   if (user && rotaSomenteVisitante) {
     const url = request.nextUrl.clone();
     url.pathname = '/novo';
-    return NextResponse.redirect(url);
+    return comCookiesDe(response, NextResponse.redirect(url));
   }
 
   return response;
+}
+
+// `getUser()` pode renovar a sessão e gravar os novos cookies em `response`
+// (via `setAll`, acima). Um redirect cria uma resposta nova — sem copiar os
+// cookies, a renovação se perde e o cliente reenvia o refresh token já
+// trocado, até o Supabase invalidar a sessão.
+function comCookiesDe(origem: NextResponse, destino: NextResponse): NextResponse {
+  origem.cookies
+    .getAll()
+    .forEach(({ name, value, ...options }) => destino.cookies.set(name, value, options));
+  return destino;
 }
 
 export const config = {
