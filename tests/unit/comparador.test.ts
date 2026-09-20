@@ -56,4 +56,35 @@ describe('encontrarDivergencias', () => {
     ]);
     expect(divergencias).toEqual([]);
   });
+
+  it('para de apontar a divergência depois que o usuário resolve, mesmo com as duas fontes originais ainda discordando', () => {
+    const divergencias = encontrarDivergencias([
+      linha({ campo: 'contato.telefone', valor: 'A', origem: 'google' }),
+      linha({ campo: 'contato.telefone', valor: 'B', origem: 'instagram' }),
+      linha({ campo: 'contato.telefone', valor: 'C', origem: 'manual', editado_pelo_usuario: true }),
+    ]);
+    expect(divergencias).toEqual([]);
+  });
+
+  it('não aponta divergência quando o mesmo horário vem em ordem diferente entre as fontes', () => {
+    const divergencias = encontrarDivergencias([
+      linha({
+        campo: 'horarios',
+        valor: [
+          { dia: 'seg', abre: '08:00', fecha: '18:00' },
+          { dia: 'ter', abre: '08:00', fecha: '18:00' },
+        ],
+        origem: 'google',
+      }),
+      linha({
+        campo: 'horarios',
+        valor: [
+          { dia: 'ter', abre: '08:00', fecha: '18:00' },
+          { dia: 'seg', abre: '08:00', fecha: '18:00' },
+        ],
+        origem: 'instagram',
+      }),
+    ]);
+    expect(divergencias).toEqual([]);
+  });
 });

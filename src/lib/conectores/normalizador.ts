@@ -91,6 +91,7 @@ export async function gravarCampos(
 }
 
 export interface LinhaCampoExtraido {
+  id?: string;
   campo: string;
   valor: unknown;
   origem: TipoFonteDados;

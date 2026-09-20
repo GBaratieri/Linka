@@ -17,16 +17,33 @@ export interface Divergencia {
   valores: ValorPorOrigem[];
 }
 
+// JSON.stringify sozinho é sensível à ordem dos itens dentro de um array —
+// "horarios" do Google sempre vem na ordem dos dias da semana, mas um
+// horário extraído por IA a partir de texto livre (Instagram) não tem essa
+// garantia. Ordena os itens antes de comparar para que a mesma lista de
+// horários em ordem diferente não seja tratada como uma divergência falsa.
+function normalizarValor(valor: unknown): string {
+  if (Array.isArray(valor)) {
+    const copia = [...valor]
+      .map((item) => JSON.stringify(item))
+      .sort();
+    return JSON.stringify(copia);
+  }
+  return JSON.stringify(valor);
+}
+
 // Compara o valor de um mesmo campo entre origens diferentes (ex.: Google
-// x Instagram) e devolve os campos onde os valores não batem. Uma edição do
-// usuário na revisão (editado_pelo_usuario=true) não entra na comparação —
-// nesse ponto o usuário já escolheu o que vale, não é mais uma divergência
-// em aberto entre fontes externas.
+// x Instagram) e devolve os campos onde os valores não batem. Um campo cuja
+// diverção já foi resolvida pelo usuário (qualquer linha com
+// editado_pelo_usuario=true) sai inteiro da comparação — nesse ponto o
+// usuário já escolheu o que vale, mesmo que as fontes originais ainda
+// discordem entre si; não teria sentido continuar reportando a mesma
+// divergência já resolvida a cada carregamento da tela.
 export function encontrarDivergencias(linhas: LinhaCampoExtraido[]): Divergencia[] {
   const porCampo = new Map<string, LinhaCampoExtraido[]>();
 
   for (const linha of linhas) {
-    if (!CAMPOS_COMPARAVEIS.has(linha.campo) || linha.editado_pelo_usuario) continue;
+    if (!CAMPOS_COMPARAVEIS.has(linha.campo)) continue;
     const lista = porCampo.get(linha.campo) ?? [];
     lista.push(linha);
     porCampo.set(linha.campo, lista);
@@ -35,7 +52,9 @@ export function encontrarDivergencias(linhas: LinhaCampoExtraido[]): Divergencia
   const divergencias: Divergencia[] = [];
 
   for (const [campo, candidatas] of porCampo) {
-    const valoresUnicos = new Set(candidatas.map((linha) => JSON.stringify(linha.valor)));
+    if (candidatas.some((linha) => linha.editado_pelo_usuario)) continue;
+
+    const valoresUnicos = new Set(candidatas.map((linha) => normalizarValor(linha.valor)));
     if (candidatas.length < 2 || valoresUnicos.size < 2) continue;
 
     divergencias.push({

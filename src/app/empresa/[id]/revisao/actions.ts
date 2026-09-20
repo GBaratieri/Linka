@@ -69,15 +69,21 @@ export async function confirmarRevisao(
     if (valorForm === null) continue;
 
     const novoValor = String(valorForm).trim() || null;
+    // Campo deixado em branco: nada para confirmar como valor final — não
+    // trava esse campo contra uma fonte futura que venha a preenchê-lo.
+    if (novoValor === null) continue;
+
     const valorAtual = (efetivos.get(campo)?.valor as string | null) ?? null;
+    const mudou = novoValor !== valorAtual;
 
-    if (novoValor === valorAtual) continue;
-
-    // Sempre grava como origem "manual" com editado_pelo_usuario=true: uma
-    // edição na revisão é a palavra final do usuário sobre aquele campo,
-    // então precisa vencer qualquer origem no cálculo do valor efetivo
-    // (ver calcularValoresEfetivos), não só entrar na disputa de prioridade
-    // normal entre fontes.
+    // Sempre grava como origem "manual" com editado_pelo_usuario=true, MESMO
+    // quando o texto não mudou: o campo já vem pré-preenchido com o valor
+    // efetivo (ver RevisaoForm), então clicar em "Confirmar dados" sem
+    // reescrever nada é a forma mais comum de o usuário aceitar o valor
+    // mostrado — precisa contar como a palavra final dele tanto quanto uma
+    // edição de texto, senão confirmar sem mexer em nada nunca protege o
+    // campo de ser sobrescrito por uma fonte adicionada depois (ver
+    // docs/decisoes.md).
     const { error } = await supabase.from('campo_extraido').upsert(
       {
         empresa_id: empresaId,
@@ -94,9 +100,13 @@ export async function confirmarRevisao(
       return { erro: 'Não foi possível salvar as alterações agora. Tente novamente em instantes.' };
     }
 
-    await supabase
-      .from('evento_produto')
-      .insert({ empresa_id: empresaId, tipo: 'campo_editado', payload: { campo } });
+    // O evento de "esforço de correção" (seção 9 do CLAUDE.md) só faz
+    // sentido quando o texto realmente mudou, não a cada confirmação.
+    if (mudou) {
+      await supabase
+        .from('evento_produto')
+        .insert({ empresa_id: empresaId, tipo: 'campo_editado', payload: { campo } });
+    }
   }
 
   try {
@@ -105,10 +115,25 @@ export async function confirmarRevisao(
     console.error('Falha ao sincronizar nome/segmento após revisão:', erro);
     return { erro: 'Não foi possível salvar as alterações agora. Tente novamente em instantes.' };
   }
-  await supabase
+
+  // Marca como confirmadas só as linhas que efetivamente valem agora (com as
+  // edições acima já aplicadas) — não as divergentes/perdedoras de outras
+  // origens, que o usuário nunca viu como "o valor" do campo.
+  const { data: linhasAtualizadas } = await supabase
     .from('campo_extraido')
-    .update({ confirmado_pelo_usuario: true })
-    .eq('empresa_id', empresaId);
+    .select('id, campo, valor, origem, confianca, editado_pelo_usuario')
+    .eq('empresa_id', empresaId)
+    .order('criado_em', { ascending: true });
+  const idsEfetivos = [...calcularValoresEfetivos(linhasAtualizadas ?? []).values()]
+    .map((linha) => linha.id)
+    .filter((id): id is string => Boolean(id));
+  if (idsEfetivos.length) {
+    await supabase
+      .from('campo_extraido')
+      .update({ confirmado_pelo_usuario: true })
+      .in('id', idsEfetivos);
+  }
+
   await supabase
     .from('empresa')
     .update({ declaracao_titularidade_em: new Date().toISOString() })
