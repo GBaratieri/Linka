@@ -78,13 +78,12 @@ export async function processarFallbackInstagram(
       .eq('id', fonteId);
 
     const uso: UsoTokens | null = usoIA;
-    if (uso !== null) {
-      await supabase.from('evento_produto').insert({
-        empresa_id: empresaId,
-        tipo: 'extracao_concluida',
-        payload: payloadComUso({ fonte: 'instagram' }, uso),
-      });
-    }
+    const base = { fonte: 'instagram' };
+    await supabase.from('evento_produto').insert({
+      empresa_id: empresaId,
+      tipo: 'extracao_concluida',
+      payload: uso !== null ? payloadComUso(base, uso) : base,
+    });
 
     return { sucesso: true };
   } catch (erro) {
