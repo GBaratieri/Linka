@@ -1,4 +1,4 @@
--- Esquema de domínio do Linka (Fase 1).
+-- Esquema de domínio do SiteLink (Fase 1).
 -- Ver seção 5 do CLAUDE.md para o modelo de dados completo.
 --
 -- Convenções:
@@ -21,7 +21,6 @@ create table public.usuario (
   id uuid primary key references auth.users (id) on delete cascade,
   nome text,
   email text not null,
-  papel text not null default 'cliente' check (papel in ('cliente', 'admin')),
   aceitou_lgpd_em timestamptz,
   criado_em timestamptz not null default now()
 );
@@ -262,12 +261,11 @@ create policy "evento_metrica_select_own" on public.evento_metrica
     )
   );
 
--- evento_produto -----------------------------------------------------------
--- Métricas de produto (seção 10 do CLAUDE.md): funil, esforço de correção,
--- custo por site, conversão etc. Gravadas pelo próprio usuário autenticado
--- durante o fluxo (link_colado, campo_editado, chamadas de IA com custo
--- estimado etc.), por isso permite insert/select do dono.
-create table public.evento_produto (
+-- evento_pesquisa -----------------------------------------------------------
+-- Métricas de validação do TCC (seção 9 do CLAUDE.md). Gravadas pelo
+-- próprio usuário autenticado durante o fluxo (link_colado, campo_editado,
+-- etc.), por isso permite insert/select do dono.
+create table public.evento_pesquisa (
   id uuid primary key default gen_random_uuid(),
   empresa_id uuid not null references public.empresa (id) on delete cascade,
   tipo text not null,
@@ -275,26 +273,26 @@ create table public.evento_produto (
   criado_em timestamptz not null default now()
 );
 
-create index evento_produto_empresa_id_idx on public.evento_produto (empresa_id);
+create index evento_pesquisa_empresa_id_idx on public.evento_pesquisa (empresa_id);
 
-alter table public.evento_produto enable row level security;
+alter table public.evento_pesquisa enable row level security;
 
-create policy "evento_produto_insert_own" on public.evento_produto
+create policy "evento_pesquisa_insert_own" on public.evento_pesquisa
   for insert
   with check (
     exists (
       select 1 from public.empresa
-      where empresa.id = evento_produto.empresa_id
+      where empresa.id = evento_pesquisa.empresa_id
         and empresa.usuario_id = auth.uid()
     )
   );
 
-create policy "evento_produto_select_own" on public.evento_produto
+create policy "evento_pesquisa_select_own" on public.evento_pesquisa
   for select
   using (
     exists (
       select 1 from public.empresa
-      where empresa.id = evento_produto.empresa_id
+      where empresa.id = evento_pesquisa.empresa_id
         and empresa.usuario_id = auth.uid()
     )
   );
