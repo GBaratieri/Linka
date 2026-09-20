@@ -160,8 +160,13 @@ function converterHorariosGoogle(
     const nomeDia = linha.slice(0, separador).trim().toLowerCase();
     const resto = linha.slice(separador + 1).trim();
     const dia = DIAS_SEMANA_PT[nomeDia];
-    const horas = resto.match(/(\d{2}:\d{2})\s*[–-]\s*(\d{2}:\d{2})/);
-    if (dia && horas) {
+    if (!dia) continue;
+
+    // Um dia pode ter mais de um intervalo (ex.: "08:00 – 12:00, 14:00 –
+    // 18:00" para horário de almoço) — captura todos, não só o primeiro.
+    const regexHorario = /(\d{2}:\d{2})\s*[–-]\s*(\d{2}:\d{2})/g;
+    let horas: RegExpExecArray | null;
+    while ((horas = regexHorario.exec(resto)) !== null) {
       horarios.push({
         dia: dia as (typeof horarios)[number]['dia'],
         abre: horas[1],
@@ -200,7 +205,12 @@ function estruturarGoogleComFixture(dados: DadosBrutosGoogle): ResultadoEstrutur
 
   return {
     empresa: {
-      nome: dados.nome ?? 'Empresa sem nome no Google',
+      // Nunca inventar (regra 2 do CLAUDE.md): sem nome nos dados do Google,
+      // fica vazio — como marcar('nome', ...) abaixo só roda quando
+      // dados.nome existe, esse "" nunca é gravado em campo_extraido; o
+      // campo aparece em branco e obrigatório na tela de revisão, pedindo
+      // que o usuário preencha em vez de receber um nome inventado.
+      nome: dados.nome ?? '',
       segmento: classificarSegmentoPorTexto(dados.categoriaPrincipal),
       descricao_curta: null,
       servicos: [],
@@ -233,16 +243,22 @@ function estruturarInstagramComFixture(dados: DadosBrutosInstagram): ResultadoEs
     origemEConfianca[caminho] = { fonte: 'instagram', confianca };
   };
 
-  marcar('nome', 'baixa');
+  // Só marca nome/contato.instagram quando existe um handle de verdade —
+  // um link para o instagram.com sem usuário (ex.: "instagram.com" puro)
+  // não tem handle (extrairHandle devolve null), e usar o hostname como
+  // fallback inventaria um "nome de empresa" sem sentido com confiança alta.
+  if (dados.handle) {
+    marcar('nome', 'baixa');
+    marcar('contato.instagram', 'alta');
+  }
   marcar('segmento', 'baixa');
-  marcar('contato.instagram', 'alta');
   if (dados.bio) marcar('descricao_curta', 'media');
   if (dados.telefoneOuWhatsapp) marcar('contato.whatsapp', 'alta');
   if (dados.fotos.length) marcar('midia.fotos', 'alta');
 
   return {
     empresa: {
-      nome: formatarHandle(dados.handle),
+      nome: dados.handle ? formatarHandle(dados.handle) : '',
       segmento: classificarSegmentoPorTexto(dados.bio),
       descricao_curta: dados.bio || null,
       servicos: [],

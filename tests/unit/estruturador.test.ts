@@ -57,6 +57,31 @@ describe('estruturarEmpresa (USE_MOCKS=true)', () => {
     );
   });
 
+  it('captura os dois intervalos de um dia com horário de almoço', async () => {
+    const resultado = await estruturarEmpresa({
+      origem: 'google',
+      dadosBrutos: {
+        ...DADOS_GOOGLE,
+        horarios: ['segunda-feira: 08:00 – 12:00, 14:00 – 18:00'],
+      },
+    });
+
+    expect(resultado.empresa.horarios).toEqual([
+      { dia: 'seg', abre: '08:00', fecha: '12:00' },
+      { dia: 'seg', abre: '14:00', fecha: '18:00' },
+    ]);
+  });
+
+  it('não inventa um nome quando o Google não informa nenhum', async () => {
+    const resultado = await estruturarEmpresa({
+      origem: 'google',
+      dadosBrutos: { ...DADOS_GOOGLE, nome: null },
+    });
+
+    expect(resultado.empresa.nome).toBe('');
+    expect(resultado.origem_e_confianca.nome).toBeUndefined();
+  });
+
   it('estrutura dados do Instagram usando só o que foi informado', async () => {
     const resultado = await estruturarEmpresa({
       origem: 'instagram',
@@ -74,6 +99,18 @@ describe('estruturarEmpresa (USE_MOCKS=true)', () => {
       fonte: 'instagram',
       confianca: 'alta',
     });
+  });
+
+  it('não inventa nome/handle quando o Instagram não tem um usuário identificável', async () => {
+    const resultado = await estruturarEmpresa({
+      origem: 'instagram',
+      dadosBrutos: { ...DADOS_INSTAGRAM, handle: null },
+    });
+
+    expect(resultado.empresa.nome).toBe('');
+    expect(resultado.empresa.contato.instagram).toBeNull();
+    expect(resultado.origem_e_confianca.nome).toBeUndefined();
+    expect(resultado.origem_e_confianca['contato.instagram']).toBeUndefined();
   });
 
   it('nunca preenche endereço a partir de dados do Instagram sem endereço', async () => {
