@@ -1,8 +1,18 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { estruturarEmpresa } from '@/lib/ia/estruturador';
 import { resultadoEstruturadorSchema } from '@/lib/schemas/empresa';
 import type { DadosBrutosGoogle } from '@/lib/conectores/google';
 import type { DadosBrutosInstagram } from '@/lib/conectores/instagram';
+
+const { mensagensCreateMock } = vi.hoisted(() => ({ mensagensCreateMock: vi.fn() }));
+vi.mock('@anthropic-ai/sdk', () => ({
+  // Precisa ser uma função "de verdade" (não arrow function): o código
+  // instancia com `new Anthropic(...)`, e só uma função construtível que
+  // retorna um objeto explicitamente substitui o `this` por esse retorno.
+  default: vi.fn().mockImplementation(function AnthropicMock() {
+    return { messages: { create: mensagensCreateMock } };
+  }),
+}));
 
 const DADOS_GOOGLE: DadosBrutosGoogle = {
   id: 'place-1',
@@ -121,5 +131,41 @@ describe('estruturarEmpresa (USE_MOCKS=true)', () => {
 
     expect(resultado.empresa.endereco).toEqual({ texto: null, lat: null, lng: null });
     expect(resultado.origem_e_confianca['endereco.texto']).toBeUndefined();
+  });
+});
+
+describe('estruturarEmpresa (USE_MOCKS=false, com o SDK da Anthropic mockado)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    mensagensCreateMock.mockReset();
+  });
+
+  it('reporta o uso de tokens da primeira chamada mesmo quando a segunda tentativa lança um erro', async () => {
+    vi.stubEnv('USE_MOCKS', 'false');
+    vi.stubEnv('ANTHROPIC_MODEL', 'claude-sonnet-5');
+    vi.stubEnv('ANTHROPIC_API_KEY', 'chave-de-teste');
+
+    mensagensCreateMock
+      // Primeira tentativa: responde, mas com saída que não bate com o schema.
+      .mockResolvedValueOnce({
+        content: [{ type: 'tool_use', input: { empresa: {} } }],
+        usage: { input_tokens: 100, output_tokens: 20 },
+      })
+      // Segunda tentativa (retry): a própria chamada falha, não só o schema.
+      .mockRejectedValueOnce(new Error('limite de taxa excedido'));
+
+    const usos: Array<{ modelo: string; tokensEntrada: number; tokensSaida: number }> = [];
+
+    await expect(
+      estruturarEmpresa({
+        origem: 'google',
+        dadosBrutos: DADOS_GOOGLE,
+        aoUsarIA: (uso) => usos.push(uso),
+      }),
+    ).rejects.toThrow('limite de taxa excedido');
+
+    // Os tokens da primeira chamada (que teve resposta e foi cobrada) não
+    // podem ser perdidos só porque a segunda tentativa lançou um erro.
+    expect(usos).toEqual([{ modelo: 'claude-sonnet-5', tokensEntrada: 100, tokensSaida: 20 }]);
   });
 });

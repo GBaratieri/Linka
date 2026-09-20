@@ -88,23 +88,28 @@ async function estruturarComIA(entrada: EntradaEstruturador): Promise<ResultadoE
     return resultadoEstruturadorSchema.safeParse(usoDeFerramenta?.input);
   };
 
-  let resultado = extrairResultado(await chamar());
-  if (!resultado.success) {
-    // Uma nova tentativa se a saída vier inválida (comportamento da IA, seção 7 do CLAUDE.md).
-    resultado = extrairResultado(await chamar());
+  try {
+    let resultado = extrairResultado(await chamar());
+    if (!resultado.success) {
+      // Uma nova tentativa se a saída vier inválida (comportamento da IA, seção 7 do CLAUDE.md).
+      resultado = extrairResultado(await chamar());
+    }
+
+    if (!resultado.success) {
+      throw new Error(
+        'Não foi possível estruturar os dados da empresa agora. Tente novamente em instantes.',
+      );
+    }
+
+    return resultado.data;
+  } finally {
+    // Reporta o uso mesmo quando a extração falhou — seja porque as duas
+    // tentativas vieram com saída inválida, seja porque a própria chamada
+    // à API lançou um erro na tentativa de novo (rede, limite de taxa):
+    // os tokens já consumidos até aqui foram cobrados de qualquer forma.
+    // O try/finally garante que isso rode em qualquer um desses casos.
+    entrada.aoUsarIA?.({ modelo, tokensEntrada, tokensSaida });
   }
-
-  // Reporta o uso mesmo quando a extração falhou nas duas tentativas — os
-  // tokens foram consumidos (e cobrados) de qualquer forma.
-  entrada.aoUsarIA?.({ modelo, tokensEntrada, tokensSaida });
-
-  if (!resultado.success) {
-    throw new Error(
-      'Não foi possível estruturar os dados da empresa agora. Tente novamente em instantes.',
-    );
-  }
-
-  return resultado.data;
 }
 
 // --- Modo mock (USE_MOCKS=true): heurísticas determinísticas, sem chamar a IA ---
