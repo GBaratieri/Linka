@@ -45,17 +45,27 @@ const usarMocks = () => process.env.USE_MOCKS !== 'false';
 
 const HOSTS_LINK_CURTO = new Set(['maps.app.goo.gl', 'g.page', 'share.google']);
 
-const CAMPO_MASCARA_BASE = [
-  'places.id',
-  'places.displayName',
-  'places.formattedAddress',
-  'places.nationalPhoneNumber',
-  'places.websiteUri',
-  'places.regularOpeningHours.weekdayDescriptions',
-  'places.primaryTypeDisplayName',
-  'places.rating',
-  'places.userRatingCount',
-  'places.location',
+// Busca (Text Search) pedindo só o id: com o FieldMask reduzido a
+// "places.id", a Places API (New) cobra pelo SKU "IDs Only", bem mais barato
+// que pedir os campos completos numa busca só (seção 3 do CLAUDE.md — "busca
+// só por IDs, sem custo, seguida de um Place Details"). Só depois de
+// confirmar o place_id é que pagamos pelos dados completos, numa única
+// chamada de Place Details.
+const CAMPO_MASCARA_BUSCA = 'places.id';
+
+// Place Details (New) devolve um único objeto Place, não uma lista — por
+// isso o FieldMask aqui NÃO usa o prefixo "places." (diferente da busca).
+const CAMPO_MASCARA_DETALHES = [
+  'id',
+  'displayName',
+  'formattedAddress',
+  'nationalPhoneNumber',
+  'websiteUri',
+  'regularOpeningHours.weekdayDescriptions',
+  'primaryTypeDisplayName',
+  'rating',
+  'userRatingCount',
+  'location',
 ].join(',');
 
 async function resolverUrl(url: string): Promise<string> {
@@ -107,9 +117,11 @@ function mapearLugar(
 }
 
 // Busca os dados de uma empresa a partir de um link do Google Maps (incluindo
-// links curtos, resolvidos via lib/seguranca/ssrf.ts). Usa a Places API (New)
-// com o menor X-Goog-FieldMask necessário (seção 3 do CLAUDE.md). Reviews só
-// são pedidas quando GOOGLE_SHOW_REVIEWS=true.
+// links curtos, resolvidos via lib/seguranca/ssrf.ts). Duas chamadas à Places
+// API (New): uma busca por texto pedindo só o id (SKU mais barato) e, com o
+// id confirmado, um único Place Details com o X-Goog-FieldMask mínimo
+// necessário (seção 3 do CLAUDE.md). Reviews só são pedidas quando
+// GOOGLE_SHOW_REVIEWS=true.
 export async function buscarDadosGoogle(url: string): Promise<DadosBrutosGoogle | null> {
   if (usarMocks()) {
     return buscarFixturePorUrl(url);
@@ -126,29 +138,54 @@ export async function buscarDadosGoogle(url: string): Promise<DadosBrutosGoogle 
     return null;
   }
 
-  const mostrarAvaliacoes = process.env.GOOGLE_SHOW_REVIEWS === 'true';
-  const mascara = mostrarAvaliacoes ? `${CAMPO_MASCARA_BASE},places.reviews` : CAMPO_MASCARA_BASE;
+  const placeId = await buscarIdDoLugar(consulta, apiKey);
+  if (!placeId) {
+    return null;
+  }
 
+  return buscarDetalhesDoLugar(placeId, apiKey);
+}
+
+async function buscarIdDoLugar(consulta: string, apiKey: string): Promise<string | null> {
   const resposta = await fetch('https://places.googleapis.com/v1/places:searchText', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'X-Goog-Api-Key': apiKey,
-      'X-Goog-FieldMask': mascara,
+      'X-Goog-FieldMask': CAMPO_MASCARA_BUSCA,
     },
     body: JSON.stringify({ textQuery: consulta, languageCode: 'pt-BR', maxResultCount: 1 }),
   });
 
   if (!resposta.ok) {
-    throw new Error(`Places API respondeu ${resposta.status}`);
+    throw new Error(`Places API (busca) respondeu ${resposta.status}`);
   }
 
-  const corpo = (await resposta.json()) as { places?: PlaceApiResultado[] };
-  const lugar = corpo.places?.[0];
-  if (!lugar) {
-    return null;
+  const corpo = (await resposta.json()) as { places?: { id: string }[] };
+  return corpo.places?.[0]?.id ?? null;
+}
+
+async function buscarDetalhesDoLugar(
+  placeId: string,
+  apiKey: string,
+): Promise<DadosBrutosGoogle | null> {
+  const mostrarAvaliacoes = process.env.GOOGLE_SHOW_REVIEWS === 'true';
+  const mascara = mostrarAvaliacoes
+    ? `${CAMPO_MASCARA_DETALHES},reviews`
+    : CAMPO_MASCARA_DETALHES;
+
+  const resposta = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`, {
+    headers: {
+      'X-Goog-Api-Key': apiKey,
+      'X-Goog-FieldMask': mascara,
+    },
+  });
+
+  if (!resposta.ok) {
+    throw new Error(`Places API (detalhes) respondeu ${resposta.status}`);
   }
 
+  const lugar = (await resposta.json()) as PlaceApiResultado;
   return mapearLugar(lugar, { mostrarAvaliacoes });
 }
 

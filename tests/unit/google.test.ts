@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buscarDadosGoogle, extrairConsulta } from '@/lib/conectores/google';
 
 describe('extrairConsulta', () => {
@@ -47,5 +47,92 @@ describe('buscarDadosGoogle (USE_MOCKS=true)', () => {
     const nomes = new Set(resultados.map((r) => r?.nome));
 
     expect(nomes.size).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('buscarDadosGoogle (USE_MOCKS=false, com fetch mockado)', () => {
+  const LUGAR_DETALHES = {
+    id: 'place-123',
+    displayName: { text: 'Padaria Pão Quente' },
+    formattedAddress: 'Rua das Flores, 123',
+    nationalPhoneNumber: '(11) 3456-7890',
+    regularOpeningHours: { weekdayDescriptions: ['segunda-feira: 06:00 – 20:00'] },
+    primaryTypeDisplayName: { text: 'Padaria' },
+    rating: 4.6,
+    userRatingCount: 128,
+    location: { latitude: -23.55, longitude: -46.63 },
+  };
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it('busca só o id (SKU mais barato) e depois faz um único Place Details', async () => {
+    vi.stubEnv('USE_MOCKS', 'false');
+    vi.stubEnv('GOOGLE_PLACES_API_KEY', 'chave-de-teste');
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ places: [{ id: 'place-123' }] }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify(LUGAR_DETALHES), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const dados = await buscarDadosGoogle(
+      'https://www.google.com/maps/place/Padaria+P%C3%A3o+Quente/@-23.5,-46.6,17z',
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const [urlBusca, opcoesBusca] = fetchMock.mock.calls[0];
+    expect(urlBusca).toBe('https://places.googleapis.com/v1/places:searchText');
+    expect((opcoesBusca?.headers as Record<string, string>)['X-Goog-FieldMask']).toBe('places.id');
+
+    const [urlDetalhes, opcoesDetalhes] = fetchMock.mock.calls[1];
+    expect(urlDetalhes).toBe('https://places.googleapis.com/v1/places/place-123');
+    const mascaraDetalhes = (opcoesDetalhes?.headers as Record<string, string>)['X-Goog-FieldMask'];
+    expect(mascaraDetalhes).not.toContain('places.');
+    expect(mascaraDetalhes).not.toContain('reviews');
+
+    expect(dados?.nome).toBe('Padaria Pão Quente');
+    expect(dados?.telefone).toBe('(11) 3456-7890');
+  });
+
+  it('só inclui reviews no Place Details quando GOOGLE_SHOW_REVIEWS=true', async () => {
+    vi.stubEnv('USE_MOCKS', 'false');
+    vi.stubEnv('GOOGLE_PLACES_API_KEY', 'chave-de-teste');
+    vi.stubEnv('GOOGLE_SHOW_REVIEWS', 'true');
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ places: [{ id: 'place-123' }] }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify(LUGAR_DETALHES), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await buscarDadosGoogle('https://maps.google.com/?q=Padaria');
+
+    const [, opcoesDetalhes] = fetchMock.mock.calls[1];
+    expect((opcoesDetalhes?.headers as Record<string, string>)['X-Goog-FieldMask']).toContain(
+      'reviews',
+    );
+  });
+
+  it('não chama Place Details quando a busca não encontra nenhum lugar', async () => {
+    vi.stubEnv('USE_MOCKS', 'false');
+    vi.stubEnv('GOOGLE_PLACES_API_KEY', 'chave-de-teste');
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ places: [] }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const dados = await buscarDadosGoogle('https://maps.google.com/?q=Empresa+Inexistente');
+
+    expect(dados).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
