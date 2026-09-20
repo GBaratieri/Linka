@@ -376,3 +376,29 @@ bugs pontuais): unificar as quatro listas hardcoded de campos (`CAMPOS_COMPARAVE
 funciona por já pegar sempre a mais recente, mas sem um mecanismo explícito para isso). Ficam para
 quando fizerem mais sentido — o segundo, em especial, junto de um redesenho maior do fluxo de
 onboarding quando a Fase 4+ da v2 chegar.
+
+## Testes de RLS (fechando uma lacuna da Fase 1 do CLAUDE.md v2)
+
+O critério de aceite da Fase 1 na versão v2 do CLAUDE.md pede "testes de RLS (usuário A não vê
+dados do B)" — um requisito novo que não existia na v1 e que, por natureza, não dá para satisfazer
+com o cliente Supabase mockado usado no resto da suíte (RLS é aplicado pelo próprio Postgres).
+
+- **Supabase CLI local via Docker**: instalada como devDependency (`npm install -D supabase`),
+  com `supabase init`/`supabase start` subindo Postgres + Auth + Storage locais e aplicando todas
+  as migrações — a mesma rodada serviu de verificação de que as migrações do retrofit (rename,
+  constraints novas) aplicam limpo num Postgres real, não só no mock.
+- **`tests/rls/`, config e script separados**: `vitest.rls.config.ts` roda só
+  `tests/rls/**/*.test.ts`, excluído do `npm run test` padrão (`vitest.config.ts`) — o padrão
+  precisa continuar rápido e sem nenhuma credencial externa (regra 4 do CLAUDE.md); os testes de
+  RLS dependem de Docker rodando e são acionados à parte via `npm run test:rls`. `fileParallelism:
+  false` porque os testes criam/apagam usuários reais no mesmo banco.
+- **Dois usuários de teste via API admin** (`tests/rls/helpers.ts`): cria usuários confirmados
+  direto (sem precisar de e-mail), devolve um cliente autenticado como cada um (chave anon +
+  sessão própria — sujeito a RLS de verdade, diferente do cliente service role usado só para
+  preparar/limpar o cenário). `tests/rls/isolamento.test.ts` cobre select/update/delete/insert
+  cruzados entre as duas contas em `empresa`, `fonte_dados`, `campo_extraido`, `evento_produto` e
+  `usuario` — 9 testes, todos passando contra o Postgres local.
+- **Chaves de desenvolvimento do Supabase local hardcoded como padrão** em `helpers.ts`: não são
+  segredo — são as mesmas chaves (`JWT_SECRET` fixo) que toda instância local do Supabase usa com a
+  configuração default, documentadas publicamente. Sobrescrevíveis por variável de ambiente se a
+  config local mudar.

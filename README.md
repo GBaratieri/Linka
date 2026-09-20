@@ -35,7 +35,10 @@ usando fixtures no lugar das chamadas reais a Supabase/Google/Anthropic.
 | `npm run start`        | Sobe o build de produção                               |
 | `npm run lint`         | ESLint                                                 |
 | `npm run typecheck`    | Gera os tipos de rota do Next.js e roda `tsc --noEmit` |
-| `npm run test`         | Testes unitários/integração (Vitest)                   |
+| `npm run test`         | Testes unitários/integração (Vitest, com mocks)        |
+| `npm run test:rls`     | Testes de RLS contra um Postgres local (ver abaixo)    |
+| `npm run supabase:start` | Sobe Postgres/Auth/Storage locais (exige Docker)     |
+| `npm run supabase:stop`  | Derruba o ambiente local do Supabase                 |
 | `npm run format`       | Formata o projeto com Prettier                         |
 | `npm run format:check` | Verifica formatação sem alterar arquivos               |
 
@@ -47,7 +50,8 @@ obrigatória para rodar em modo mock (`USE_MOCKS=true`).
 - **Supabase** — crie um projeto em [supabase.com](https://supabase.com), copie a URL e as chaves
   em Project Settings → API para `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` e
   `SUPABASE_SERVICE_ROLE_KEY`. As migrações ficam em [`supabase/migrations`](./supabase/migrations)
-  — veja o [README da pasta](./supabase/README.md) para aplicá-las.
+  — veja o [README da pasta](./supabase/README.md) para aplicá-las, incluindo como rodar um
+  Postgres local (com Docker) para testar RLS de verdade.
 - **Google Places API (New)** — habilite a API no Google Cloud Console e gere uma chave para
   `GOOGLE_PLACES_API_KEY`. Mantenha `GOOGLE_SHOW_REVIEWS` e `GOOGLE_SHOW_PHOTOS` como `false` até
   revisar os termos de uso vigentes da API para exibição desses dados.

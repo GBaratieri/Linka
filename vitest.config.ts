@@ -14,5 +14,10 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./tests/setup.ts'],
     include: ['tests/**/*.test.{ts,tsx}'],
+    // tests/rls precisa de um Postgres real (supabase start) e roda à parte
+    // via `npm run test:rls` (vitest.rls.config.ts) — não faz parte do
+    // `npm run test` padrão, que precisa continuar rodando sem nenhuma
+    // credencial externa (regra 4 do CLAUDE.md).
+    exclude: ['node_modules/**', 'tests/rls/**'],
   },
 });
