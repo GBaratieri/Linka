@@ -120,11 +120,12 @@ de derivados de `Row` via `Omit`/`Partial`.
   de lógica.
 - **Resolução de link do Google Maps**: em vez de tentar extrair um `place_id` de dentro da URL
   (o parâmetro `data=` do Maps é opaco), extraímos o nome da empresa do próprio caminho da URL
-  (`/maps/place/Nome+Da+Empresa/...` ou `?q=...`) e usamos a Text Search (New) da Places API, que
-  já devolve os campos necessários num só request. Links curtos (`maps.app.goo.gl`, `g.page`,
+  (`/maps/place/Nome+Da+Empresa/...` ou `?q=...`). Links curtos (`maps.app.goo.gl`, `g.page`,
   `share.google`) são resolvidos antes via `lib/seguranca/ssrf.ts` (primeiro uso real desse
-  módulo, construído na Fase 1). **Isso não foi testado contra a API real** — precisa ser
-  confirmado com uma chave de verdade antes de considerar pronto para produção.
+  módulo, construído na Fase 1). **A extração do nome/consulta a partir da URL não foi testada
+  contra a API real** — precisa ser confirmada com uma chave de verdade antes de considerar pronto
+  para produção; o request/response da Places API em si já tem cobertura de teste com `fetch`
+  mockado (ver decisão abaixo, pós-CLAUDE.md v2).
 - **Fotos do Google adiadas**: `GOOGLE_SHOW_PHOTOS=true` ligaria o campo `places.photos` no
   `X-Goog-FieldMask`, mas as fotos da Places API (New) só vêm como uma referência opaca
   (`photo.name`) que precisa de uma chamada separada ao endpoint de mídia (com a chave da API) e
@@ -233,3 +234,49 @@ altitude e conformidade com o `CLAUDE.md`). 11 problemas de corretude encontrado
   `extrairHandle` caía para o hostname da URL, que virava um nome de empresa sem sentido com
   confiança alta. Agora devolve `null` quando não há handle, e `nome`/`contato.instagram` só são
   marcados (e preenchidos) quando existe um handle de verdade.
+
+## Retrofit para o escopo de produto real (pós-CLAUDE.md v2)
+
+O CLAUDE.md foi substituído por uma versão de produto comercial com assinatura (era MVP de TCC).
+Como as Fases 0–2 já tinham sido entregues e aprovadas sob a versão antiga, alguns pontos
+precisaram ser ajustados para alinhar com a nova versão antes de seguir para fases novas:
+
+- **`evento_pesquisa` renomeada para `evento_produto`**: a versão nova do CLAUDE.md chama a mesma
+  tabela de métricas de "produto" em vez de "pesquisa" (o produto deixou de ser só um artefato de
+  TCC). Como nada tinha sido aplicado a um Supabase real ainda, a migração original
+  (`20260919120000_esquema_dominio.sql`) foi editada diretamente em vez de criar uma migração de
+  rename em cima — evita duas migrações ("cria com nome errado, depois renomeia") num esquema que
+  nunca foi implantado. Todo o código que gravava em `evento_pesquisa` (`criarEmpresa.ts`,
+  `normalizador.ts`, `revisao/actions.ts`) e os testes que mockavam essa tabela foram atualizados.
+- **`usuario.papel` (`cliente` | `admin`)**: adicionado à mesma migração original, com default
+  `'cliente'` — o trigger `handle_new_user` não precisou mudar porque o default cobre o caso comum
+  (cadastro normal); só a Fase 7 (`/admin`) vai de fato promover alguém a `admin`, direto no banco.
+- **Custo de IA registrado em `evento_produto`** (seção 8.6 do CLAUDE.md): `lib/metricas/custos.ts`
+  estima o custo em reais a partir de tokens de entrada/saída e do modelo, usando `USD_BRL` e uma
+  tabela de preços por modelo (só Sonnet e Haiku cadastrados por enquanto; modelo desconhecido usa o
+  preço do Sonnet como estimativa conservadora — **conferir a tabela de preços vigente da Anthropic
+  antes de usar isso para decidir limites de gasto de verdade**). `ia/estruturador.ts` não grava no
+  banco diretamente (mantém a camada de IA sem depender do Supabase); em vez disso,
+  `estruturarEmpresa` aceita um callback opcional `aoUsarIA`, chamado só no caminho real (nunca no
+  mock) com os tokens consumidos, e quem chama (`processarFonteDados`, `processarFallbackInstagram`)
+  decide como registrar. Reportar mesmo quando a extração falhou nas duas tentativas, já que os
+  tokens foram consumidos de qualquer forma.
+  - Achado colateral de TypeScript: com `strict` ligado, `{ ...variavel }` não type-checa quando
+    `variavel` é uma `let` que foi reatribuída dentro de uma closure assíncrona (`aoUsarIA: (uso) =>
+    { usoIA = uso; }`) e só depois estreitada com `!== null` — o compilador não consegue provar que
+    o spread é seguro nesse caminho específico, mesmo copiando para uma `const` antes. Contornado
+    com uma função auxiliar (`payloadComUso`) que recebe o valor já não-nulo como parâmetro comum
+    (não uma variável historicamente mutada em closure), onde o spread type-checa normalmente.
+- **Conector Google: busca só por id, depois um Place Details** (seção 3 do CLAUDE.md, "preferir
+  busca só por IDs, sem custo, seguida de um Place Details"): antes, `buscarDadosGoogle` fazia uma
+  única Text Search já pedindo todos os campos. Agora primeiro busca só `places.id` (SKU "IDs Only"
+  da Places API, mais barato) e só then, com o id confirmado, faz **um** Place Details com o
+  `X-Goog-FieldMask` completo — o Place Details usa nomes de campo sem o prefixo `places.` porque
+  devolve um objeto único, não uma lista. Adicionada cobertura de teste com `fetch` mockado para as
+  duas chamadas (algo que não existia antes: a Fase 2 só tinha testado o caminho mock). A ressalva
+  já registrada acima continua valendo — o formato exato da URL/consulta ainda não foi validado
+  contra a API real.
+- **Verificador de consistência (Fase 2 da v2) e as demais fases novas ainda não foram
+  retrofitadas** — ficam para quando essas fases forem de fato executadas, já que envolvem decisões
+  de produto (ex.: se uma empresa pode ter mais de uma `fonte_dados` simultânea para comparar) que
+  precisam ser confirmadas antes de implementar.
