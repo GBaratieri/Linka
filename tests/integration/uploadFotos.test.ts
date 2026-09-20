@@ -8,24 +8,31 @@ function criarArquivo(nome: string, tipo: string, tamanhoBytes: number): File {
   return new File([conteudo], nome, { type: tipo });
 }
 
-function criarClienteStorageMock(opcoes: { erroUpload?: boolean } = {}) {
+function criarClienteStorageMock(opcoes: { erroUpload?: boolean; falharNaChamada?: number } = {}) {
   const nomesEnviados: string[] = [];
+  const chamadasRemove: string[][] = [];
+  let chamadasUpload = 0;
 
   const from = vi.fn(() => ({
     upload: vi.fn(async (nome: string) => {
-      nomesEnviados.push(nome);
-      if (opcoes.erroUpload) {
+      chamadasUpload += 1;
+      if (opcoes.erroUpload || chamadasUpload === opcoes.falharNaChamada) {
         return { data: null, error: { message: 'falhou' } };
       }
+      nomesEnviados.push(nome);
       return { data: { path: nome }, error: null };
     }),
     getPublicUrl: vi.fn((nome: string) => ({
       data: { publicUrl: `https://storage.exemplo.com/${nome}` },
     })),
+    remove: vi.fn(async (nomes: string[]) => {
+      chamadasRemove.push(nomes);
+      return { data: null, error: null };
+    }),
   }));
 
   const cliente = { storage: { from } } as unknown as SupabaseClient<Database>;
-  return { cliente, nomesEnviados };
+  return { cliente, nomesEnviados, chamadasRemove };
 }
 
 describe('enviarFotos', () => {
@@ -94,5 +101,41 @@ describe('enviarFotos', () => {
       sucesso: false,
       erro: 'Não foi possível enviar as fotos. Tente novamente.',
     });
+  });
+
+  it('rejeita o lote inteiro sem enviar nada quando um arquivo é inválido', async () => {
+    const { cliente, nomesEnviados } = criarClienteStorageMock();
+    const arquivos = [
+      criarArquivo('foto1.jpg', 'image/jpeg', 1024),
+      criarArquivo('documento.pdf', 'application/pdf', 1024),
+    ];
+
+    const resultado = await enviarFotos(cliente, 'empresa-1', arquivos);
+
+    expect(resultado).toEqual({
+      sucesso: false,
+      erro: 'Formato de imagem não suportado (use JPEG, PNG ou WebP).',
+    });
+    // Nenhum arquivo é enviado — a validação roda antes de qualquer upload.
+    expect(nomesEnviados).toHaveLength(0);
+  });
+
+  it('remove as fotos já enviadas do lote quando um upload seguinte falha', async () => {
+    const { cliente, nomesEnviados, chamadasRemove } = criarClienteStorageMock({
+      falharNaChamada: 2,
+    });
+    const arquivos = [
+      criarArquivo('foto1.jpg', 'image/jpeg', 1024),
+      criarArquivo('foto2.jpg', 'image/jpeg', 1024),
+    ];
+
+    const resultado = await enviarFotos(cliente, 'empresa-1', arquivos);
+
+    expect(resultado).toEqual({
+      sucesso: false,
+      erro: 'Não foi possível enviar as fotos. Tente novamente.',
+    });
+    expect(nomesEnviados).toHaveLength(1);
+    expect(chamadasRemove).toEqual([nomesEnviados]);
   });
 });

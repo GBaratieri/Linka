@@ -30,17 +30,23 @@ export async function enviarFotos(
     return { sucesso: false, erro: `Envie no máximo ${MAXIMO_FOTOS} fotos.` };
   }
 
-  const urls: string[] = [];
-
+  // Valida tipo e tamanho de todos os arquivos antes de enviar qualquer um —
+  // evita subir parte do lote para só depois rejeitar por um arquivo
+  // inválido mais adiante.
   for (const arquivo of comConteudo) {
-    const extensao = TIPOS_PERMITIDOS[arquivo.type];
-    if (!extensao) {
+    if (!TIPOS_PERMITIDOS[arquivo.type]) {
       return { sucesso: false, erro: 'Formato de imagem não suportado (use JPEG, PNG ou WebP).' };
     }
     if (arquivo.size > TAMANHO_MAXIMO_BYTES) {
       return { sucesso: false, erro: 'Cada foto deve ter no máximo 5MB.' };
     }
+  }
 
+  const nomesEnviados: string[] = [];
+  const urls: string[] = [];
+
+  for (const arquivo of comConteudo) {
+    const extensao = TIPOS_PERMITIDOS[arquivo.type];
     const nomeArquivo = `${empresaId}/${crypto.randomUUID()}.${extensao}`;
     const { error } = await supabase.storage.from(BUCKET).upload(nomeArquivo, arquivo, {
       contentType: arquivo.type,
@@ -48,9 +54,15 @@ export async function enviarFotos(
     });
 
     if (error) {
+      // Um arquivo já enviado neste mesmo lote não deve ficar órfão no
+      // Storage só porque um arquivo seguinte falhou.
+      if (nomesEnviados.length) {
+        await supabase.storage.from(BUCKET).remove(nomesEnviados);
+      }
       return { sucesso: false, erro: 'Não foi possível enviar as fotos. Tente novamente.' };
     }
 
+    nomesEnviados.push(nomeArquivo);
     const {
       data: { publicUrl },
     } = supabase.storage.from(BUCKET).getPublicUrl(nomeArquivo);
