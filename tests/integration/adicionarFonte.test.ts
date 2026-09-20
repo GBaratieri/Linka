@@ -4,8 +4,7 @@ import type { Database } from '@/lib/supabase/tipos-banco';
 import { adicionarFonteComLink, adicionarFonteManual } from '@/lib/conectores/adicionarFonte';
 
 interface Comportamento {
-  fonteExistente?: boolean;
-  erroInsertFonte?: { message: string };
+  erroInsertFonte?: { message: string; code?: string };
 }
 
 function criarClienteMock(comportamento: Comportamento = {}) {
@@ -14,16 +13,6 @@ function criarClienteMock(comportamento: Comportamento = {}) {
   const from = vi.fn((tabela: string) => {
     if (tabela === 'fonte_dados') {
       return {
-        select: vi.fn(() => ({
-          eq: vi.fn(() => ({
-            eq: vi.fn(() => ({
-              maybeSingle: vi.fn(async () => ({
-                data: comportamento.fonteExistente ? { id: 'fonte-existente' } : null,
-                error: null,
-              })),
-            })),
-          })),
-        })),
         insert: vi.fn(async (valores: unknown) => {
           chamadas.fonteInsert = valores;
           if (comportamento.erroInsertFonte) {
@@ -71,8 +60,10 @@ describe('adicionarFonteComLink', () => {
     });
   });
 
-  it('rejeita quando a empresa já tem uma fonte desse tipo', async () => {
-    const { cliente, from } = criarClienteMock({ fonteExistente: true });
+  it('rejeita quando a empresa já tem uma fonte desse tipo (constraint única do banco)', async () => {
+    const { cliente, chamadas } = criarClienteMock({
+      erroInsertFonte: { message: 'duplicate key value violates unique constraint', code: '23505' },
+    });
 
     const resultado = await adicionarFonteComLink(
       cliente,
@@ -84,7 +75,7 @@ describe('adicionarFonteComLink', () => {
       sucesso: false,
       erro: 'Essa empresa já tem uma fonte desse tipo. Escolha um tipo diferente para comparar.',
     });
-    expect(from).not.toHaveBeenCalledWith('evento_produto');
+    expect(chamadas.eventoInsert).toBeUndefined();
   });
 
   it('rejeita um link inválido sem consultar o banco', async () => {
