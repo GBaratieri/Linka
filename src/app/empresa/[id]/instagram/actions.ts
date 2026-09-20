@@ -40,7 +40,7 @@ export async function salvarFallbackInstagram(
     return { erro: uploadResultado.erro };
   }
 
-  await processarFallbackInstagram(
+  const resultadoProcessamento = await processarFallbackInstagram(
     supabase,
     empresaId,
     fonteId,
@@ -48,6 +48,10 @@ export async function salvarFallbackInstagram(
     resultado.data,
     uploadResultado.urls,
   );
+
+  if (!resultadoProcessamento.sucesso) {
+    return { erro: 'Não foi possível salvar os dados agora. Tente novamente em instantes.' };
+  }
 
   redirect(`/empresa/${empresaId}/revisao`);
 }

@@ -5,7 +5,7 @@ import { estruturarEmpresa } from '@/lib/ia/estruturador';
 import { gravarCamposExtraidos } from './normalizador';
 
 export interface DadosBrutosInstagram {
-  handle: string;
+  handle: string | null;
   bio: string;
   telefoneOuWhatsapp: string | null;
   fotos: string[];
@@ -15,6 +15,10 @@ export interface ResultadoInstagram {
   status: 'nao_configurado';
 }
 
+export interface ResultadoProcessamentoInstagram {
+  sucesso: boolean;
+}
+
 // Sem integração real com a API do Instagram neste MVP (seção 11 do
 // CLAUDE.md) — sempre aciona o fallback manual (bio + telefone/WhatsApp +
 // fotos), tratado em app/empresa/[id]/instagram/.
@@ -22,14 +26,25 @@ export function verificarInstagram(): ResultadoInstagram {
   return { status: 'nao_configurado' };
 }
 
-export function extrairHandle(url: string): string {
+// Devolve null quando a URL não tem um nome de usuário no caminho (ex.:
+// "https://instagram.com" sem perfil) — nesse caso não há handle real para
+// usar, e usar o hostname como se fosse o handle inventaria um nome de
+// empresa sem sentido (ver estruturarInstagramComFixture, que só marca
+// nome/contato.instagram quando o handle existe).
+export function extrairHandle(url: string): string | null {
   const analisada = new URL(url);
-  return analisada.pathname.replace(/^\/+|\/+$/g, '').split('/')[0] || analisada.hostname;
+  const segmento = analisada.pathname.replace(/^\/+|\/+$/g, '').split('/')[0];
+  return segmento || null;
 }
 
 // Bio + telefone/WhatsApp são texto semiestruturado — passam pelo mesmo
 // estruturador de IA (7.1) usado para o Google, para extrair segmento,
 // descrição etc. As fotos, já enviadas ao Storage, entram direto.
+// Erros da IA/gravação são capturados aqui (diferente do fluxo do Google,
+// que tem seu próprio try/catch em processarFonteDados) para não deixar uma
+// exceção não tratada escapar da server action depois que as fotos já foram
+// enviadas ao Storage; o status da fonte não é alterado em caso de erro,
+// permitindo que o usuário reenvie o mesmo formulário.
 export async function processarFallbackInstagram(
   supabase: SupabaseClient<Database>,
   empresaId: string,
@@ -37,7 +52,7 @@ export async function processarFallbackInstagram(
   fonteUrl: string,
   dados: FormularioInstagramInput,
   fotos: string[],
-): Promise<void> {
+): Promise<ResultadoProcessamentoInstagram> {
   const dadosBrutos: DadosBrutosInstagram = {
     handle: extrairHandle(fonteUrl),
     bio: dados.bio ?? '',
@@ -45,11 +60,18 @@ export async function processarFallbackInstagram(
     fotos,
   };
 
-  const resultado = await estruturarEmpresa({ origem: 'instagram', dadosBrutos });
-  await gravarCamposExtraidos(supabase, empresaId, resultado);
+  try {
+    const resultado = await estruturarEmpresa({ origem: 'instagram', dadosBrutos });
+    await gravarCamposExtraidos(supabase, empresaId, resultado);
 
-  await supabase
-    .from('fonte_dados')
-    .update({ status: 'ok', bruto: dadosBrutos, coletado_em: new Date().toISOString() })
-    .eq('id', fonteId);
+    await supabase
+      .from('fonte_dados')
+      .update({ status: 'ok', bruto: dadosBrutos, coletado_em: new Date().toISOString() })
+      .eq('id', fonteId);
+
+    return { sucesso: true };
+  } catch (erro) {
+    console.error('Falha ao processar o fallback do Instagram:', erro);
+    return { sucesso: false };
+  }
 }

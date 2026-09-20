@@ -4,19 +4,22 @@ import type { Database } from '@/lib/supabase/tipos-banco';
 import { processarFallbackInstagram } from '@/lib/conectores/instagram';
 import type { FormularioInstagramInput } from '@/lib/schemas/manual';
 
-function criarClienteMock() {
+function criarClienteMock(opcoes: { erroConsulta?: boolean } = {}) {
   const camposInseridos: Array<{ campo: string; valor: unknown }> = [];
   const chamadasFonteUpdate: unknown[] = [];
 
   const from = vi.fn((tabela: string) => {
     if (tabela === 'campo_extraido') {
       return {
-        insert: vi.fn(async (valores: { campo: string; valor: unknown }) => {
+        upsert: vi.fn(async (valores: { campo: string; valor: unknown }) => {
           camposInseridos.push(valores);
           return { data: null, error: null };
         }),
         select: vi.fn(() => ({
           eq: vi.fn(() => {
+            if (opcoes.erroConsulta) {
+              return Promise.resolve({ data: null, error: { message: 'falhou' } });
+            }
             const promessa = Promise.resolve({ data: [] as unknown[], error: null });
             return Object.assign(promessa, {
               in: vi.fn(async (_coluna: string, valores: string[]) => ({
@@ -82,5 +85,42 @@ describe('processarFallbackInstagram', () => {
     expect(camposPorNome['endereco.texto']).toBeUndefined();
 
     expect(chamadasFonteUpdate[0]).toMatchObject({ status: 'ok' });
+  });
+
+  it('não inventa nome/handle quando o link do Instagram não tem usuário no caminho', async () => {
+    const { cliente, camposInseridos } = criarClienteMock();
+
+    const dados: FormularioInstagramInput = {
+      bio: 'Fazemos entregas em toda a cidade!',
+      telefoneOuWhatsapp: null,
+    };
+
+    await processarFallbackInstagram(cliente, 'empresa-2', 'fonte-2', 'https://instagram.com', dados, []);
+
+    const camposGravados = camposInseridos.map((c) => c.campo);
+    expect(camposGravados).not.toContain('nome');
+    expect(camposGravados).not.toContain('contato.instagram');
+  });
+
+  it('devolve sucesso: false em vez de lançar quando a gravação falha', async () => {
+    const { cliente, chamadasFonteUpdate } = criarClienteMock({ erroConsulta: true });
+
+    const dados: FormularioInstagramInput = {
+      bio: 'Salão de beleza e cabelo em Curitiba.',
+      telefoneOuWhatsapp: '41999998888',
+    };
+
+    const resultado = await processarFallbackInstagram(
+      cliente,
+      'empresa-3',
+      'fonte-3',
+      'https://instagram.com/salao.bela_hair',
+      dados,
+      [],
+    );
+
+    expect(resultado).toEqual({ sucesso: false });
+    // Não marca a fonte como "ok" quando a gravação falhou.
+    expect(chamadasFonteUpdate).toHaveLength(0);
   });
 });
