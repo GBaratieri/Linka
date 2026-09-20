@@ -177,3 +177,59 @@ de derivados de `Row` via `Omit`/`Partial`.
 - **Fixtures do Google**: 3 negócios fictícios (`padaria`, `oficina`, `moveis`) escolhidos de forma
   determinística por um hash simples da URL, o suficiente para o critério de aceite ("pelo menos 3
   negócios diferentes") sem precisar de uma tabela de URLs reais mapeadas a mão.
+
+## Revisão de código (pós-Fase 2)
+
+Revisão completa do diff da Fase 2 (10 ângulos: linha a linha, comportamento removido, rastreamento
+entre arquivos, armadilhas de linguagem, consistência mock/real, reuso, simplificação, eficiência,
+altitude e conformidade com o `CLAUDE.md`). 11 problemas de corretude encontrados e corrigidos:
+
+- **`gravarDadosManual` duplicava linhas em `campo_extraido` ao reenviar o formulário** (duplo
+  clique, "voltar" do navegador): a função sempre fazia `insert`, sem checar linha existente.
+  Extraído um `gravarCampos` compartilhado (usado também por `gravarCamposExtraidos`) que consulta o
+  que já existe e faz upsert/update por campo; adicionada constraint única
+  `(empresa_id, campo)` em `campo_extraido` como segunda camada de proteção contra corridas
+  simultâneas.
+- **Fallback do Instagram sem tratamento de erro**: uma falha da IA (ou da gravação) depois que as
+  fotos já tinham sido enviadas ao Storage virava uma exceção não tratada, travando a fonte em
+  `nao_configurado` para sempre. `processarFallbackInstagram` agora captura o erro e devolve
+  `{ sucesso: false }`; a action mostra uma mensagem amigável e o usuário pode reenviar o mesmo
+  formulário (o status não muda em caso de falha).
+- **Políticas de Storage do bucket `fotos-empresa` sem checagem de dono**: as políticas de
+  upload/exclusão só verificavam `bucket_id`, diferente de toda tabela do banco (que sempre junta com
+  `empresa.usuario_id = auth.uid()`). Corrigidas para exigir que a pasta do objeto
+  (`storage.foldername(name)[1]`, que é o `empresa_id`) pertença ao usuário autenticado.
+- **Limpar o nome na revisão dessincronizava `empresa.nome`**: o campo não era obrigatório no
+  formulário e `sincronizarNomeESegmento` ignorava silenciosamente um valor vazio, deixando
+  `campo_extraido` e `empresa.nome` divergentes sem erro nenhum. Nome e ramo agora são obrigatórios
+  em `/revisao` (com validação também no servidor, não só no `required` do HTML), e a sincronização
+  propaga o valor tal como está em vez de pular linhas com valor vazio.
+- **Horário de almoço (dois intervalos no mesmo dia) era truncado**: `converterHorariosGoogle` usava
+  um regex sem `/g`, capturando só o primeiro intervalo de uma linha como
+  `"08:00 – 12:00, 14:00 – 18:00"`. Agora itera todos os intervalos da linha.
+- **Erros de leitura/escrita do Supabase eram ignorados** em `gravarCampos`/`sincronizarNomeESegmento`:
+  uma falha de RLS ou de rede fazia a extração terminar como "ok" mesmo sem gravar nada. Os erros
+  agora são propagados (lançados) e capturados pelos chamadores (`processarFonteDados`,
+  `processarFallbackInstagram`, `salvarManual`, `confirmarRevisao`), que voltam a marcar a fonte como
+  erro ou mostrar uma mensagem em vez de seguir como se nada tivesse acontecido.
+- **`/empresa/[id]` podia mascarar um erro real já gravado**: depois de rodar a extração do Google, a
+  página fazia uma segunda consulta para "descobrir" o status, e se essa consulta falhasse caía de
+  volta no valor antigo (`pendente`) — levando o usuário pra revisão com o formulário vazio em vez de
+  mostrar a tela de erro. `processarFonteDados` agora devolve o status final diretamente, sem
+  segunda consulta (e sem repetir, para o Instagram, a suposição de qual status ele sempre resulta).
+- **Fixture do Google inventava o nome "Empresa sem nome no Google"** quando a Places API não
+  retorna nome nenhum — violando a regra de nunca inventar dado (seção 2 do CLAUDE.md). Agora fica
+  como string vazia e sem marcação de origem/confiança, então nunca é gravado em `campo_extraido`; o
+  campo aparece em branco e obrigatório na revisão, pedindo que o usuário preencha.
+- **`.single()` em `fonte_dados` virava 404 se a linha ainda não existisse** (ex.: pequena
+  defasagem logo após criar a empresa) em vez do comportamento mais tolerante da tela anterior à
+  Fase 2. Trocado por `.maybeSingle()`.
+- **Upload de fotos deixava arquivos órfãos no Storage em falha parcial**: `enviarFotos` só validava
+  tipo/tamanho durante o loop de upload, então um arquivo inválido no meio do lote deixava os
+  anteriores já enviados sem nenhuma referência no banco. Agora valida tipo/tamanho de todo o lote
+  antes de enviar qualquer arquivo, e remove do Storage o que já tinha sido enviado se um upload
+  seguinte falhar.
+- **Link do Instagram sem usuário no caminho (ex.: só `instagram.com`) inventava um "nome"**:
+  `extrairHandle` caía para o hostname da URL, que virava um nome de empresa sem sentido com
+  confiança alta. Agora devolve `null` quando não há handle, e `nome`/`contato.instagram` só são
+  marcados (e preenchidos) quando existe um handle de verdade.
