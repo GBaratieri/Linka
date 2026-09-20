@@ -53,7 +53,7 @@ function criarClienteMock() {
       };
     }
 
-    if (tabela === 'evento_pesquisa') {
+    if (tabela === 'evento_produto') {
       return {
         insert: vi.fn(async (valores: { tipo: string; payload: unknown }) => {
           eventosRegistrados.push(valores);

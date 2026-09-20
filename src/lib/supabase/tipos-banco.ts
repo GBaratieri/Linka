@@ -1,4 +1,4 @@
-import type { TipoFonteDados, StatusFonteDados } from '@/lib/conectores/tipos';
+import type { TipoFonteDados, StatusFonteDados, Papel } from '@/lib/conectores/tipos';
 
 type LinhaCompleta<Row, ChavesOpcionaisNaInsercao extends keyof Row> = {
   Row: Row;
@@ -20,6 +20,7 @@ export interface Database {
           id: string;
           nome: string | null;
           email: string;
+          papel: Papel;
           aceitou_lgpd_em: string | null;
           criado_em: string;
         };
@@ -27,11 +28,13 @@ export interface Database {
           id: string;
           nome?: string | null;
           email: string;
+          papel?: Papel;
           aceitou_lgpd_em?: string | null;
         };
         Update: Partial<{
           nome: string | null;
           email: string;
+          papel: Papel;
           aceitou_lgpd_em: string | null;
         }>;
         Relationships: [];
@@ -101,7 +104,7 @@ export interface Database {
         },
         'confirmado_pelo_usuario' | 'editado_pelo_usuario'
       >;
-      evento_pesquisa: {
+      evento_produto: {
         Row: {
           id: string;
           empresa_id: string;

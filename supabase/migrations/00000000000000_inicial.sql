@@ -1,4 +1,4 @@
 -- Migração inicial (Fase 0).
 -- As tabelas do domínio (usuario, empresa, fonte_dados, campo_extraido, template, site,
--- versao_site, evento_metrica, evento_pesquisa, feedback) e suas políticas de RLS são criadas
--- na Fase 1, conforme a seção 5 do CLAUDE.md.
+-- versao_site, evento_metrica, evento_produto, feedback) e suas políticas de RLS são criadas
+-- na Fase 1, conforme a seção 6 do CLAUDE.md.

@@ -4,6 +4,7 @@ import type { TipoFonteDados, StatusFonteDados } from './tipos';
 import type { ResultadoEstruturador, Confianca } from '@/lib/schemas/empresa';
 import { buscarDadosGoogle } from './google';
 import { estruturarEmpresa } from '@/lib/ia/estruturador';
+import { payloadComUso, type UsoTokens } from '@/lib/metricas/custos';
 
 // Campos onde o Google prevalece sobre Instagram/manual, e vice-versa
 // (seção 8 do CLAUDE.md, regra de conflito da Fase 2). Fora dessas listas,
@@ -213,7 +214,14 @@ export async function processarFonteDados(
       return 'erro';
     }
 
-    const resultado = await estruturarEmpresa({ origem: 'google', dadosBrutos: dados });
+    let usoIA: UsoTokens | null = null;
+    const resultado = await estruturarEmpresa({
+      origem: 'google',
+      dadosBrutos: dados,
+      aoUsarIA: (uso) => {
+        usoIA = uso;
+      },
+    });
     await gravarCamposExtraidos(supabase, empresaId, resultado);
 
     await supabase
@@ -221,10 +229,12 @@ export async function processarFonteDados(
       .update({ status: 'ok', bruto: dados, coletado_em: new Date().toISOString() })
       .eq('id', fonte.id);
 
-    await supabase.from('evento_pesquisa').insert({
+    const uso: UsoTokens | null = usoIA;
+    const base = { fonte: 'google', duracaoMs: Date.now() - inicio };
+    await supabase.from('evento_produto').insert({
       empresa_id: empresaId,
       tipo: 'extracao_concluida',
-      payload: { fonte: 'google', duracaoMs: Date.now() - inicio },
+      payload: uso !== null ? payloadComUso(base, uso) : base,
     });
     return 'ok';
   } catch (erro) {

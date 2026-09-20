@@ -39,7 +39,7 @@ async function criarEmpresaComFonte(
     return { sucesso: false, erro: ERRO_GENERICO_FONTE };
   }
 
-  const { error: erroEvento } = await supabase.from('evento_pesquisa').insert({
+  const { error: erroEvento } = await supabase.from('evento_produto').insert({
     empresa_id: empresa.id,
     tipo: 'link_colado',
     payload: { fonte: tipo, url },
@@ -48,7 +48,7 @@ async function criarEmpresaComFonte(
   if (erroEvento) {
     // Métrica de pesquisa (seção 9 do CLAUDE.md), não deve bloquear o
     // usuário — mas a falha precisa ficar visível em algum lugar.
-    console.error('Falha ao registrar evento_pesquisa "link_colado":', erroEvento);
+    console.error('Falha ao registrar evento_produto "link_colado":', erroEvento);
   }
 
   return { sucesso: true, empresaId: empresa.id };

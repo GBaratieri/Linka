@@ -85,7 +85,7 @@ export async function confirmarRevisao(
     }
 
     await supabase
-      .from('evento_pesquisa')
+      .from('evento_produto')
       .insert({ empresa_id: empresaId, tipo: 'campo_editado', payload: { campo } });
   }
 
@@ -104,7 +104,7 @@ export async function confirmarRevisao(
     .update({ declaracao_titularidade_em: new Date().toISOString() })
     .eq('id', empresaId);
   await supabase
-    .from('evento_pesquisa')
+    .from('evento_produto')
     .insert({ empresa_id: empresaId, tipo: 'revisao_confirmada' });
 
   redirect(`/empresa/${empresaId}/confirmado`);

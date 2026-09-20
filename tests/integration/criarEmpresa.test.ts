@@ -58,7 +58,7 @@ function criarClienteMock(comportamento: Comportamento = {}) {
       };
     }
 
-    if (tabela === 'evento_pesquisa') {
+    if (tabela === 'evento_produto') {
       return {
         insert: vi.fn(async (valores: unknown) => {
           chamadas.eventoPesquisaInsert = valores;
