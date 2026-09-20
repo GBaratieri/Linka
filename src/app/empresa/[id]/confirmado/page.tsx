@@ -40,6 +40,12 @@ export default async function ConfirmadoPage({ params }: PageProps<'/empresa/[id
       <p className="text-sm text-gray-600 dark:text-gray-400">
         A geração do site (escolha de estilo e prévia) será implementada na próxima fase.
       </p>
+      <a
+        href={`/empresa/${id}/adicionar-fonte`}
+        className="text-sm text-gray-600 underline underline-offset-2 dark:text-gray-400"
+      >
+        Quer comparar com outra fonte (Google ou Instagram)?
+      </a>
     </main>
   );
 }
