@@ -1,5 +1,13 @@
 import type { TipoFonteDados, StatusFonteDados } from '@/lib/conectores/tipos';
 
+type LinhaCompleta<Row, ChavesOpcionaisNaInsercao extends keyof Row> = {
+  Row: Row;
+  Insert: Omit<Row, ChavesOpcionaisNaInsercao | 'id' | 'criado_em'> &
+    Partial<Pick<Row, ChavesOpcionaisNaInsercao>>;
+  Update: Partial<Omit<Row, 'id' | 'criado_em'>>;
+  Relationships: [];
+};
+
 // Tipagem manual, cobrindo só as tabelas usadas pelo código até agora.
 // Ideal seria gerar via `supabase gen types typescript`, mas isso requer um
 // projeto Supabase real (ver docs/decisoes.md). Ampliar conforme cada fase
@@ -79,6 +87,20 @@ export interface Database {
         }>;
         Relationships: [];
       };
+      campo_extraido: LinhaCompleta<
+        {
+          id: string;
+          empresa_id: string;
+          campo: string;
+          valor: unknown;
+          origem: TipoFonteDados;
+          confianca: 'alta' | 'media' | 'baixa';
+          confirmado_pelo_usuario: boolean;
+          editado_pelo_usuario: boolean;
+          criado_em: string;
+        },
+        'confirmado_pelo_usuario' | 'editado_pelo_usuario'
+      >;
       evento_pesquisa: {
         Row: {
           id: string;
