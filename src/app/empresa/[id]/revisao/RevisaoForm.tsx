@@ -2,6 +2,7 @@
 
 import { useActionState } from 'react';
 import { confirmarRevisao, type EstadoRevisao } from './actions';
+import type { Divergencia } from '@/lib/consistencia/comparador';
 
 const estadoInicial: EstadoRevisao = {};
 
@@ -10,6 +11,39 @@ export interface CampoExtraido {
   valor: unknown;
   origem: string;
   confianca: 'alta' | 'media' | 'baixa';
+}
+
+const ROTULO_ORIGEM: Record<string, string> = {
+  google: 'Google',
+  instagram: 'Instagram',
+  manual: 'Preenchimento manual',
+};
+
+function formatarValorDivergente(valor: unknown): string {
+  if (valor === null || valor === undefined) return '—';
+  if (Array.isArray(valor)) {
+    return valor
+      .map((item) =>
+        item && typeof item === 'object' && 'dia' in item
+          ? `${(item as { dia: string }).dia}: ${(item as { abre: string }).abre}–${(item as { fecha: string }).fecha}`
+          : String(item),
+      )
+      .join(', ');
+  }
+  return String(valor);
+}
+
+function AvisoDivergencia({ divergencia }: { divergencia: Divergencia }) {
+  return (
+    <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+      Os dados não batem entre as fontes — qual está certo?{' '}
+      {divergencia.valores
+        .map(
+          (item) => `${ROTULO_ORIGEM[item.origem] ?? item.origem}: ${formatarValorDivergente(item.valor)}`,
+        )
+        .join(' · ')}
+    </p>
+  );
 }
 
 const CLASSE_INPUT =
@@ -61,11 +95,20 @@ function CampoSomenteLeitura({ rotulo, children }: { rotulo: string; children: R
   );
 }
 
-export function RevisaoForm({ empresaId, campos }: { empresaId: string; campos: CampoExtraido[] }) {
+export function RevisaoForm({
+  empresaId,
+  campos,
+  divergencias = [],
+}: {
+  empresaId: string;
+  campos: CampoExtraido[];
+  divergencias?: Divergencia[];
+}) {
   const confirmarComId = confirmarRevisao.bind(null, empresaId);
   const [estado, formAction, pendente] = useActionState(confirmarComId, estadoInicial);
 
   const porCampo = new Map(campos.map((linha) => [linha.campo, linha]));
+  const divergenciaPorCampo = new Map(divergencias.map((d) => [d.campo, d]));
   const horarios = porCampo.get('horarios')?.valor as
     Array<{ dia: string; abre: string; fecha: string }> | undefined;
   const servicos = porCampo.get('servicos')?.valor as Array<{ nome: string }> | undefined;
@@ -80,6 +123,7 @@ export function RevisaoForm({ empresaId, campos }: { empresaId: string; campos: 
         {CAMPOS_FORMULARIO.map(({ campo, rotulo, tipo }) => {
           const linha = porCampo.get(campo);
           const valor = typeof linha?.valor === 'string' ? linha.valor : '';
+          const divergencia = divergenciaPorCampo.get(campo);
 
           return (
             <div key={campo} className="flex flex-col gap-1">
@@ -89,6 +133,7 @@ export function RevisaoForm({ empresaId, campos }: { empresaId: string; campos: 
                 </label>
                 {linha ? <SeloConfianca confianca={linha.confianca} /> : null}
               </div>
+              {divergencia ? <AvisoDivergencia divergencia={divergencia} /> : null}
 
               {tipo === 'select' ? (
                 <select id={campo} name={campo} defaultValue={valor} required className={CLASSE_INPUT}>
@@ -136,6 +181,9 @@ export function RevisaoForm({ empresaId, campos }: { empresaId: string; campos: 
                   </li>
                 ))}
               </ul>
+              {divergenciaPorCampo.get('horarios') ? (
+                <AvisoDivergencia divergencia={divergenciaPorCampo.get('horarios')!} />
+              ) : null}
             </CampoSomenteLeitura>
           ) : null}
 

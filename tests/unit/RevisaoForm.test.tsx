@@ -48,4 +48,31 @@ describe('RevisaoForm', () => {
     expect(screen.getByLabelText('Nome da empresa')).toBeRequired();
     expect(screen.getByLabelText('Ramo')).toBeRequired();
   });
+
+  it('mostra um aviso quando há divergência entre fontes para um campo', () => {
+    render(
+      <RevisaoForm
+        empresaId="empresa-1"
+        campos={CAMPOS}
+        divergencias={[
+          {
+            campo: 'contato.telefone',
+            valores: [
+              { origem: 'google', valor: '(11) 3456-7890' },
+              { origem: 'instagram', valor: '(11) 99999-0000' },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText(/não batem entre as fontes/)).toBeInTheDocument();
+    expect(screen.getByText(/Google: \(11\) 3456-7890/)).toBeInTheDocument();
+    expect(screen.getByText(/Instagram: \(11\) 99999-0000/)).toBeInTheDocument();
+  });
+
+  it('não mostra aviso de divergência quando a lista está vazia', () => {
+    render(<RevisaoForm empresaId="empresa-1" campos={CAMPOS} divergencias={[]} />);
+    expect(screen.queryByText(/não batem entre as fontes/)).not.toBeInTheDocument();
+  });
 });

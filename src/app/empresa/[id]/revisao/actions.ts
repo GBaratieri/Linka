@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation';
 import { criarClienteServidor } from '@/lib/supabase/server';
-import { sincronizarNomeESegmento } from '@/lib/conectores/normalizador';
+import { sincronizarNomeESegmento, calcularValoresEfetivos } from '@/lib/conectores/normalizador';
 import { segmentoSchema } from '@/lib/schemas/empresa';
 
 export interface EstadoRevisao {
@@ -53,35 +53,45 @@ export async function confirmarRevisao(
     redirect('/login');
   }
 
-  const { data: existentes } = await supabase
+  // Pode haver mais de uma linha por campo (uma por origem) desde que passou
+  // a ser possível complementar a extração com outra fonte — compara contra
+  // o valor efetivo (já resolvido entre as origens), não contra uma linha
+  // qualquer.
+  const { data: linhas } = await supabase
     .from('campo_extraido')
-    .select('id, campo, valor')
-    .eq('empresa_id', empresaId);
-  const porCampo = new Map((existentes ?? []).map((linha) => [linha.campo, linha]));
+    .select('campo, valor, origem, confianca, editado_pelo_usuario')
+    .eq('empresa_id', empresaId)
+    .order('criado_em', { ascending: true });
+  const efetivos = calcularValoresEfetivos(linhas ?? []);
 
   for (const campo of CAMPOS_EDITAVEIS) {
     const valorForm = formData.get(campo);
     if (valorForm === null) continue;
 
     const novoValor = String(valorForm).trim() || null;
-    const existente = porCampo.get(campo);
-    const valorAtual = existente ? ((existente.valor as string | null) ?? null) : null;
+    const valorAtual = (efetivos.get(campo)?.valor as string | null) ?? null;
 
     if (novoValor === valorAtual) continue;
 
-    if (existente) {
-      await supabase
-        .from('campo_extraido')
-        .update({ valor: novoValor, editado_pelo_usuario: true })
-        .eq('id', existente.id);
-    } else if (novoValor !== null) {
-      await supabase.from('campo_extraido').insert({
+    // Sempre grava como origem "manual" com editado_pelo_usuario=true: uma
+    // edição na revisão é a palavra final do usuário sobre aquele campo,
+    // então precisa vencer qualquer origem no cálculo do valor efetivo
+    // (ver calcularValoresEfetivos), não só entrar na disputa de prioridade
+    // normal entre fontes.
+    const { error } = await supabase.from('campo_extraido').upsert(
+      {
         empresa_id: empresaId,
         campo,
         valor: novoValor,
         origem: 'manual',
         confianca: 'alta',
-      });
+        editado_pelo_usuario: true,
+      },
+      { onConflict: 'empresa_id,campo,origem' },
+    );
+    if (error) {
+      console.error(`Falha ao gravar a edição do campo "${campo}":`, error);
+      return { erro: 'Não foi possível salvar as alterações agora. Tente novamente em instantes.' };
     }
 
     await supabase
