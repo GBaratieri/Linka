@@ -1,8 +1,15 @@
 import { notFound, redirect } from 'next/navigation';
 import { criarClienteServidor } from '@/lib/supabase/server';
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export default async function EmpresaPage({ params }: PageProps<'/empresa/[id]'>) {
   const { id } = await params;
+
+  if (!UUID_REGEX.test(id)) {
+    notFound();
+  }
+
   const supabase = await criarClienteServidor();
 
   const {
@@ -13,13 +20,13 @@ export default async function EmpresaPage({ params }: PageProps<'/empresa/[id]'>
     redirect('/login');
   }
 
-  const { data: empresa } = await supabase
+  const { data: empresa, error: erroEmpresa } = await supabase
     .from('empresa')
-    .select('id, criado_em')
+    .select('id')
     .eq('id', id)
     .single();
 
-  if (!empresa) {
+  if (erroEmpresa || !empresa) {
     notFound();
   }
 
