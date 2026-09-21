@@ -104,8 +104,9 @@ const SAUDACAO_POR_TOM: Record<TomDeVoz, (nome: string) => string> = {
   formal: (nome) => `Bem-vindo à ${nome}`,
   descontraido: (nome) => `Ei, que bom te ver por aqui! Essa é a ${nome}`,
   acolhedor: (nome) => `Seja muito bem-vindo à ${nome}`,
+  // Direto ao ponto, sem saudação — o tom técnico não usa boas-vindas.
   tecnico: (nome) => nome,
-  premium: (nome) => nome,
+  premium: (nome) => `Descubra a ${nome}`,
 };
 
 const CTA_POR_TOM: Record<TomDeVoz, string> = {
