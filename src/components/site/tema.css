@@ -33,7 +33,12 @@
 .botao-whatsapp {
   display: inline-block;
   background-color: #25d366;
-  color: #ffffff;
+  /* Texto branco sobre o verde da marca do WhatsApp fica em ~1.98:1 de
+     contraste — abaixo do mínimo AA (4.5:1) que o resto do site garante via
+     corrigirContraste. Como esse par de cores é fixo (marca), não passa
+     pelo corretor de contraste dinâmico — usa um verde escuro que mantém a
+     identidade visual e chega a ~6.2:1. */
+  color: #0b3d1f;
   padding: 0.5rem 1rem;
   border-radius: var(--raio-borda);
   font-size: 0.875rem;

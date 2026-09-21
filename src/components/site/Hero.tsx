@@ -18,15 +18,10 @@ export function Hero({ empresa, conteudo, estilo }: DadosSite) {
       >
         {conteudo.hero.titulo}
       </h1>
-      <p className="max-w-xl text-lg opacity-80">{conteudo.hero.subtitulo}</p>
-      {estilo.destaque_cta === 'whatsapp' ? (
-        <BotaoWhatsApp
-          numero={empresa.contato.whatsapp ?? empresa.contato.telefone}
-          nomeEmpresa={empresa.nome}
-          horarios={empresa.horarios}
-          className="botao-primario"
-        />
-      ) : estilo.destaque_cta === 'telefone' && empresa.contato.telefone ? (
+      {conteudo.hero.subtitulo ? (
+        <p className="max-w-xl text-lg opacity-80">{conteudo.hero.subtitulo}</p>
+      ) : null}
+      {estilo.destaque_cta === 'telefone' && empresa.contato.telefone ? (
         <a href={`tel:${empresa.contato.telefone}`} className="botao-primario">
           {conteudo.cta_principal}
         </a>
@@ -39,7 +34,18 @@ export function Hero({ empresa, conteudo, estilo }: DadosSite) {
         >
           {conteudo.cta_principal}
         </a>
-      ) : null}
+      ) : (
+        // Destaque explícito no WhatsApp, ou o destaque escolhido ('telefone'
+        // ou 'mapa') não tem o dado que precisa — o WhatsApp é o canal
+        // principal do produto (seção 1 do CLAUDE.md), então é o fallback
+        // padrão em vez de deixar o hero sem nenhuma chamada para ação.
+        <BotaoWhatsApp
+          numero={empresa.contato.whatsapp ?? empresa.contato.telefone}
+          nomeEmpresa={empresa.nome}
+          horarios={empresa.horarios}
+          className="botao-primario"
+        />
+      )}
     </section>
   );
 }

@@ -9,9 +9,9 @@ export function Servicos({ empresa, conteudo }: DadosSite) {
     <section className="site-secao">
       <h2 className="mb-6 text-center text-2xl font-bold sm:text-3xl">Serviços</h2>
       <div className="mx-auto grid max-w-4xl gap-6 sm:grid-cols-2">
-        {conteudo.servicos.map((servico) => (
+        {conteudo.servicos.map((servico, indice) => (
           <div
-            key={servico.nome}
+            key={`${servico.nome}-${indice}`}
             className="flex flex-col gap-2 rounded-[var(--raio-borda)] border border-current/10 p-5"
           >
             <h3 className="font-semibold">{servico.nome}</h3>
