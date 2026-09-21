@@ -4,25 +4,11 @@ import { redirect } from 'next/navigation';
 import { criarClienteServidor } from '@/lib/supabase/server';
 import { sincronizarNomeESegmento, calcularValoresEfetivos } from '@/lib/conectores/normalizador';
 import { segmentoSchema } from '@/lib/schemas/empresa';
+import { CAMPOS_EDITAVEIS } from './campos';
 
 export interface EstadoRevisao {
   erro?: string;
 }
-
-// Só os campos escalares (texto/número) são editáveis nesta tela; horários,
-// serviços e fotos aparecem como leitura nesta fase (ver docs/decisoes.md,
-// "Edição inline limitada a campos escalares").
-export const CAMPOS_EDITAVEIS = [
-  'nome',
-  'segmento',
-  'descricao_curta',
-  'contato.telefone',
-  'contato.whatsapp',
-  'contato.email',
-  'contato.instagram',
-  'contato.site',
-  'endereco.texto',
-] as const;
 
 export async function confirmarRevisao(
   empresaId: string,
@@ -64,7 +50,7 @@ export async function confirmarRevisao(
     .order('criado_em', { ascending: true });
   const efetivos = calcularValoresEfetivos(linhas ?? []);
 
-  for (const campo of CAMPOS_EDITAVEIS) {
+  for (const { campo } of CAMPOS_EDITAVEIS) {
     const valorForm = formData.get(campo);
     if (valorForm === null) continue;
 

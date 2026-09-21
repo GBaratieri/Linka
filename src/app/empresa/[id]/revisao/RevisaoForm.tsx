@@ -2,6 +2,7 @@
 
 import { useActionState } from 'react';
 import { confirmarRevisao, type EstadoRevisao } from './actions';
+import { CAMPOS_EDITAVEIS as CAMPOS_FORMULARIO } from './campos';
 import type { Divergencia } from '@/lib/consistencia/comparador';
 
 const estadoInicial: EstadoRevisao = {};
@@ -49,22 +50,6 @@ function AvisoDivergencia({ divergencia }: { divergencia: Divergencia }) {
 const CLASSE_INPUT =
   'rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900';
 const CLASSE_LABEL = 'text-sm font-medium';
-
-const CAMPOS_FORMULARIO: Array<{
-  campo: string;
-  rotulo: string;
-  tipo: 'texto' | 'select' | 'textarea';
-}> = [
-  { campo: 'nome', rotulo: 'Nome da empresa', tipo: 'texto' },
-  { campo: 'segmento', rotulo: 'Ramo', tipo: 'select' },
-  { campo: 'descricao_curta', rotulo: 'Descrição curta', tipo: 'textarea' },
-  { campo: 'contato.telefone', rotulo: 'Telefone', tipo: 'texto' },
-  { campo: 'contato.whatsapp', rotulo: 'WhatsApp', tipo: 'texto' },
-  { campo: 'contato.email', rotulo: 'E-mail', tipo: 'texto' },
-  { campo: 'contato.instagram', rotulo: 'Instagram', tipo: 'texto' },
-  { campo: 'contato.site', rotulo: 'Site', tipo: 'texto' },
-  { campo: 'endereco.texto', rotulo: 'Endereço', tipo: 'texto' },
-];
 
 const CORES_CONFIANCA: Record<CampoExtraido['confianca'], string> = {
   alta: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
