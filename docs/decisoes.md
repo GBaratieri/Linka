@@ -402,3 +402,52 @@ com o cliente Supabase mockado usado no resto da suíte (RLS é aplicado pelo pr
   segredo — são as mesmas chaves (`JWT_SECRET` fixo) que toda instância local do Supabase usa com a
   configuração default, documentadas publicamente. Sobrescrevíveis por variável de ambiente se a
   config local mudar.
+
+## Fase 3
+
+- **Interseção template × estilo, não união**: `resolverSecoes` filtra a lista de seções do
+  `template` (baseline por segmento) pelas seções que o `estilo_config` também pede — o pedido do
+  usuário só pode *remover* seções do baseline, nunca adicionar uma que o template do segmento não
+  define. Decisão deliberada: o template já reflete o que faz sentido para aquele tipo de negócio;
+  deixar o texto livre do usuário adicionar seções abriria margem para a IA "inventar" uma seção
+  (ex.: Galeria) sem necessariamente haver dado real para preenchê-la — a omissão por falta de dado
+  em cada componente já cobre esse caso de qualquer forma.
+- **`empresa.cidade` nunca é escrita por nenhum conector** (Google, Instagram, manual) — gap
+  descoberto ao implementar o padrão de SEO `{serviço} em {cidade}` (seção 8.3). Corrigir isso
+  exigiria estender o `X-Goog-FieldMask` do Google para `addressComponents`, adicionar um campo no
+  formulário manual e um novo caminho de sincronização — nenhuma dessas mudanças está listada nos
+  itens desta fase. Decisão: manter o gap, deixar o SEO degradar para "só o nome da empresa" sem
+  cidade (nunca inventar uma), e documentar aqui em vez de expandir o escopo da Fase 3 por conta
+  própria.
+- **WhatsApp cai para `telefone` quando não há `whatsapp` explícito**: `Servicos.tsx` e o hero
+  passam `empresa.contato.whatsapp ?? empresa.contato.telefone` para `BotaoWhatsApp`. No Brasil,
+  telefone comercial e WhatsApp costumam ser o mesmo número — a alternativa (só mostrar o botão
+  quando o campo `whatsapp` foi preenchido à parte) deixaria o CTA de "destaque" do estilo
+  (`destaque_cta: 'whatsapp'`) invisível na maioria dos casos reais, já que os conectores hoje quase
+  nunca populam um `whatsapp` distinto do `telefone`.
+- **`next/font/google` não carrega fonte dinâmica em runtime**: como a fonte escolhida só é
+  conhecida depois da geração de IA, todas as 8 famílias permitidas (enum do schema de estilo) são
+  pré-carregadas em `lib/site/fontes.ts` com `next/font/google`, cada uma com uma `variable` CSS
+  própria. `lib/site/tema.ts` fica isolado dessa importação (só referencia os nomes das variáveis
+  como string, numa tabela `VARIAVEL_CSS_POR_FONTE`) para continuar puro e testável em Vitest sem o
+  compilador do Next — só `fontes.ts` (que nenhum teste unitário importa) depende de `next/font`.
+- **`site`/`versao_site` alterados em vez de criados**: o CLAUDE.md v2 lista `versao_site.site_id`
+  como Fase 3 e `site` como Fase 4, mas as duas tabelas já existem desde a migração original da
+  Fase 1 (que cria todo o esquema de uma vez). A migração desta fase usa `ALTER TABLE` (subdomínio
+  aceita `null`, `status` aceita `'suspenso'`, `versao_site` ganha `nota_qualidade`) em vez de
+  `CREATE TABLE`, depois de inspecionar o esquema real (`\d public.site`) para confirmar os nomes
+  exatos das constraints.
+- **Bug de produção só visível com navegador real + Postgres real** (não achado por nenhum teste
+  automatizado): `CAMPOS_EDITAVEIS`, uma lista simples exportada de `revisao/actions.ts` (arquivo
+  `'use server'`) desde a Fase 2, quebra em runtime real — "A 'use server' file can only export
+  async functions, found object." Nenhum teste existente pega isso porque todos mockam o cliente
+  Supabase e nunca fazem o Next.js empacotar/rodar o arquivo como server action de verdade; o bug só
+  apareceu ao clicar em "Confirmar dados" pela primeira vez contra o Supabase local (ver seção
+  "Testes de RLS"). Corrigido extraindo a lista para `revisao/campos.ts` (sem `'use server'`), o que
+  também unificou essa lista com a cópia duplicada que já existia em `RevisaoForm.tsx`
+  (`CAMPOS_FORMULARIO`) — um dos itens deixados em aberto na revisão de código do retrofit.
+  Conferido por grep que nenhum outro arquivo `'use server'` do projeto exporta algo além de
+  `interface`/`type` (apagados em tempo de compilação, portanto seguros) ou `async function`.
+- **Texto desatualizado em `/empresa/[id]/confirmado`**: ainda dizia que a geração de estilo "será
+  implementada na próxima fase" — sobrou de antes desta fase existir. Trocado por um CTA real para
+  `/empresa/[id]/estilo`, encontrado durante o mesmo teste manual acima.
