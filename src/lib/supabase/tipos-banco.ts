@@ -1,4 +1,4 @@
-import type { TipoFonteDados, StatusFonteDados, Papel } from '@/lib/conectores/tipos';
+import type { TipoFonteDados, StatusFonteDados, Papel, StatusSite } from '@/lib/conectores/tipos';
 
 type LinhaCompleta<Row, ChavesOpcionaisNaInsercao extends keyof Row> = {
   Row: Row;
@@ -120,6 +120,46 @@ export interface Database {
         Update: Record<string, never>;
         Relationships: [];
       };
+      template: {
+        Row: {
+          id: string;
+          segmento: string;
+          nome: string;
+          componentes: unknown;
+          criado_em: string;
+        };
+        Insert: {
+          segmento: string;
+          nome: string;
+          componentes: unknown;
+        };
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      site: LinhaCompleta<
+        {
+          id: string;
+          empresa_id: string;
+          subdominio: string | null;
+          status: StatusSite;
+          publicado_em: string | null;
+          criado_em: string;
+        },
+        'subdominio' | 'status' | 'publicado_em'
+      >;
+      versao_site: LinhaCompleta<
+        {
+          id: string;
+          site_id: string;
+          template_id: string | null;
+          estilo_texto: string | null;
+          estilo_config: unknown;
+          conteudo: unknown;
+          nota_qualidade: number | null;
+          criado_em: string;
+        },
+        'template_id' | 'estilo_texto' | 'estilo_config' | 'conteudo' | 'nota_qualidade'
+      >;
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

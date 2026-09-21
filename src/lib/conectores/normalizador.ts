@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@/lib/supabase/tipos-banco';
 import type { TipoFonteDados, StatusFonteDados } from './tipos';
-import type { ResultadoEstruturador, Confianca } from '@/lib/schemas/empresa';
+import type { ResultadoEstruturador, Confianca, EmpresaNormalizada, Segmento } from '@/lib/schemas/empresa';
 import { buscarDadosGoogle } from './google';
 import { estruturarEmpresa } from '@/lib/ia/estruturador';
 import { payloadComUso, type UsoTokens } from '@/lib/metricas/custos';
@@ -133,6 +133,49 @@ export function calcularValoresEfetivos(
   }
 
   return porCampo;
+}
+
+// Reconstrói o formato EmpresaNormalizada (seção 7 do CLAUDE.md) a partir
+// dos valores efetivos de campo_extraido — é essa reconstrução, não o
+// resultado bruto de uma extração, que a Fase 3 usa pra gerar textos e
+// renderizar o site: reflete os dados já confirmados/editados na revisão,
+// de todas as fontes combinadas. Campo sem valor efetivo = null/vazio,
+// nunca inventado (regra 2 do CLAUDE.md).
+export function montarEmpresaNormalizada(
+  valoresEfetivos: Map<string, LinhaCampoExtraido>,
+): EmpresaNormalizada {
+  const valor = (campo: string): unknown => valoresEfetivos.get(campo)?.valor;
+
+  return {
+    nome: (valor('nome') as string | undefined) ?? '',
+    segmento: (valor('segmento') as Segmento | undefined) ?? 'outro',
+    descricao_curta: (valor('descricao_curta') as string | undefined) ?? null,
+    servicos: (valor('servicos') as EmpresaNormalizada['servicos'] | undefined) ?? [],
+    contato: {
+      whatsapp: (valor('contato.whatsapp') as string | undefined) ?? null,
+      telefone: (valor('contato.telefone') as string | undefined) ?? null,
+      email: (valor('contato.email') as string | undefined) ?? null,
+      instagram: (valor('contato.instagram') as string | undefined) ?? null,
+      site: (valor('contato.site') as string | undefined) ?? null,
+    },
+    endereco: {
+      texto: (valor('endereco.texto') as string | undefined) ?? null,
+      lat: (valor('endereco.lat') as number | undefined) ?? null,
+      lng: (valor('endereco.lng') as number | undefined) ?? null,
+    },
+    horarios: (valor('horarios') as EmpresaNormalizada['horarios'] | undefined) ?? [],
+    midia: {
+      logo: (valor('midia.logo') as string | undefined) ?? null,
+      fotos: (valor('midia.fotos') as string[] | undefined) ?? [],
+    },
+    prova_social: {
+      nota: (valor('prova_social.nota') as number | undefined) ?? null,
+      total_avaliacoes: (valor('prova_social.total_avaliacoes') as number | undefined) ?? null,
+      avaliacoes:
+        (valor('prova_social.avaliacoes') as EmpresaNormalizada['prova_social']['avaliacoes'] | undefined) ??
+        [],
+    },
+  };
 }
 
 // Grava o resultado do estruturador em campo_extraido, aplicando a regra de
