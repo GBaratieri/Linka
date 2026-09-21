@@ -102,6 +102,39 @@ describe('verificarConteudo', () => {
     });
     expect(verificarConteudo(conteudo, EMPRESA_BASE).aprovado).toBe(true);
   });
+
+  it('não reprova o telefone real citado com o código do país quando o dado armazenado não tem', () => {
+    // EMPRESA_BASE.contato.telefone = '(11) 3333-4444', sem +55 — um texto
+    // que cita o mesmo número COM o código do país é o mesmo fato, só
+    // escrito de outro jeito.
+    const conteudo = conteudoBase({
+      sobre: 'Pães e doces frescos todos os dias. Ligue +55 11 3333-4444.',
+    });
+    expect(verificarConteudo(conteudo, EMPRESA_BASE).aprovado).toBe(true);
+  });
+
+  it('reprova um horário inventado escrito no formato informal ("9h", sem minutos)', () => {
+    const conteudo = conteudoBase({
+      hero: { titulo: 'Padaria Pão Quente', subtitulo: 'Abrimos das 9h às 22h.' },
+    });
+    const resultado = verificarConteudo(conteudo, EMPRESA_BASE);
+    expect(resultado.aprovado).toBe(false);
+    expect(resultado.problemas.some((p) => p.includes('horário'))).toBe(true);
+  });
+
+  it('aprova o horário real quando escrito no formato informal ("6h", sem minutos)', () => {
+    const conteudo = conteudoBase({
+      hero: { titulo: 'Padaria Pão Quente', subtitulo: 'Abertos das 6h às 20h.' },
+    });
+    expect(verificarConteudo(conteudo, EMPRESA_BASE).aprovado).toBe(true);
+  });
+
+  it('não trata um número solto sem marcador de hora (idade, quantidade) como horário', () => {
+    const conteudo = conteudoBase({
+      sobre: 'Mais de 18 anos de tradição, com 20 sabores de pão todos os dias.',
+    });
+    expect(verificarConteudo(conteudo, EMPRESA_BASE).aprovado).toBe(true);
+  });
 });
 
 describe('sanitizarConteudo', () => {

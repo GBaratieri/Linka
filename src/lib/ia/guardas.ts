@@ -8,21 +8,37 @@ import type { EmpresaNormalizada } from '@/lib/schemas/empresa';
 
 const REGEX_TELEFONE = /(?:\+?55\s?)?\(?\d{2}\)?[\s.-]?\d{4,5}[\s.-]?\d{4}/g;
 const REGEX_VALOR_MONETARIO = /R\$\s?\d{1,3}(?:\.\d{3})*(?:,\d{2})?/gi;
-const REGEX_HORARIO = /\b([01]?\d|2[0-3])[:h]([0-5]\d)\b/gi;
+// Minuto explícito ("09:00", "9h30") OU um "h" logo depois da hora ("9h",
+// "22h") — um dos dois é obrigatório (não opcional), senão qualquer número
+// de 0 a 23 solto no texto (idade, ano abreviado, quantidade) viraria um
+// falso positivo de horário.
+const REGEX_HORARIO = /\b([01]?\d|2[0-3])(?:[:h]([0-5]\d)|h)\b/gi;
 const REGEX_ENDERECO = /\b(rua|av\.?|avenida|alameda|travessa|rodovia|estrada)\s+\S+/i;
 
-function normalizarTelefone(valor: string): string {
+function apenasDigitos(valor: string): string {
   return valor.replace(/\D/g, '');
 }
 
-function normalizarValorMonetario(valor: string): string {
-  return valor.replace(/\D/g, '');
+// Canonicaliza um telefone pro DDD + número local (sem código de país), pra
+// comparar um fato armazenado com/sem "55" na frente contra o mesmo número
+// escrito de outro jeito no texto gerado — sem isso, um telefone real
+// citado sem o código de país (comum em texto corrido) batia como
+// "inventado" só por causa do formato. Segue o mesmo critério de
+// comprimento do site/whatsapp.ts (não confunde um DDD 55 com o código do
+// país: só remove um "55" na frente quando sobra um número de 10/11
+// dígitos).
+function telefoneParaComparacao(valor: string): string {
+  const digitos = apenasDigitos(valor);
+  if ((digitos.length === 12 || digitos.length === 13) && digitos.startsWith('55')) {
+    return digitos.slice(2);
+  }
+  return digitos;
 }
 
 function normalizarHorario(valor: string): string {
-  const m = valor.match(/([01]?\d|2[0-3])[:h]([0-5]\d)/i);
+  const m = valor.match(/([01]?\d|2[0-3])(?:[:h]([0-5]\d)|h)/i);
   if (!m) return valor;
-  return `${m[1].padStart(2, '0')}:${m[2]}`;
+  return `${m[1].padStart(2, '0')}:${m[2] ?? '00'}`;
 }
 
 interface FatosPermitidos {
@@ -34,13 +50,17 @@ interface FatosPermitidos {
 
 function extrairFatosPermitidos(empresa: EmpresaNormalizada): FatosPermitidos {
   const telefones = new Set<string>();
-  if (empresa.contato.telefone) telefones.add(normalizarTelefone(empresa.contato.telefone));
-  if (empresa.contato.whatsapp) telefones.add(normalizarTelefone(empresa.contato.whatsapp));
+  if (empresa.contato.telefone) telefones.add(telefoneParaComparacao(empresa.contato.telefone));
+  if (empresa.contato.whatsapp) telefones.add(telefoneParaComparacao(empresa.contato.whatsapp));
 
+  // Normaliza também os horários armazenados (não só os que aparecem no
+  // texto gerado) — o schema não obriga zero à esquerda em `abre`/`fecha`,
+  // então sem isso um fato real gravado como "9:00" nunca bateria contra o
+  // "09:00" que o texto gerado (corretamente normalizado) menciona.
   const horarios = new Set<string>();
   for (const horario of empresa.horarios) {
-    horarios.add(horario.abre);
-    horarios.add(horario.fecha);
+    horarios.add(normalizarHorario(horario.abre));
+    horarios.add(normalizarHorario(horario.fecha));
   }
 
   const textosFonte = [empresa.descricao_curta, ...empresa.servicos.map((s) => s.descricao)].filter(
@@ -49,7 +69,7 @@ function extrairFatosPermitidos(empresa: EmpresaNormalizada): FatosPermitidos {
   const valoresMonetarios = new Set<string>();
   for (const texto of textosFonte) {
     for (const match of texto.matchAll(REGEX_VALOR_MONETARIO)) {
-      valoresMonetarios.add(normalizarValorMonetario(match[0]));
+      valoresMonetarios.add(apenasDigitos(match[0]));
     }
   }
 
@@ -65,14 +85,14 @@ function encontrarViolacoes(campo: string, texto: string, fatos: FatosPermitidos
   const problemas: string[] = [];
 
   for (const match of texto.matchAll(REGEX_TELEFONE)) {
-    const normalizado = normalizarTelefone(match[0]);
+    const normalizado = telefoneParaComparacao(match[0]);
     if (normalizado.length >= 10 && !fatos.telefones.has(normalizado)) {
       problemas.push(`${campo}: telefone "${match[0]}" não está nos dados de entrada.`);
     }
   }
 
   for (const match of texto.matchAll(REGEX_VALOR_MONETARIO)) {
-    const normalizado = normalizarValorMonetario(match[0]);
+    const normalizado = apenasDigitos(match[0]);
     if (!fatos.valoresMonetarios.has(normalizado)) {
       problemas.push(`${campo}: valor "${match[0]}" não está nos dados de entrada.`);
     }
