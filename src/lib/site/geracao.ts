@@ -9,10 +9,15 @@ import { verificarConteudo, sanitizarConteudo } from '@/lib/ia/guardas';
 import { corrigirContraste } from '@/lib/site/tema';
 import { payloadComUso, type UsoTokens } from '@/lib/metricas/custos';
 import { LIMITE_GERACOES_POR_MES } from '@/lib/config/planos';
+import { inicioDoMesNoFusoDoNegocio } from '@/lib/site/fuso';
 
 export type ResultadoGeracaoSite =
   | { sucesso: true; siteId: string }
   | { sucesso: false; erro: string };
+
+// Código do Postgres para violação de constraint única (unique_violation) —
+// mesmo usado em conectores/adicionarFonte.ts.
+const CODIGO_ERRO_UNICIDADE = '23505';
 
 // Conta quantas gerações essa empresa já usou no mês corrente (seção 9 do
 // CLAUDE.md: evento site_gerado), pra aplicar o limite do plano (seção 1) —
@@ -22,9 +27,7 @@ async function geracoesUsadasNoMes(
   supabase: SupabaseClient<Database>,
   empresaId: string,
 ): Promise<number> {
-  const inicioDoMes = new Date();
-  inicioDoMes.setDate(1);
-  inicioDoMes.setHours(0, 0, 0, 0);
+  const inicioDoMes = inicioDoMesNoFusoDoNegocio();
 
   const { data } = await supabase
     .from('evento_produto')
@@ -55,31 +58,22 @@ export async function gerarNovaVersaoDoSite(
     };
   }
 
-  const { data: empresaRow, error: erroEmpresa } = await supabase
-    .from('empresa')
-    .select('segmento, cidade')
-    .eq('id', empresaId)
-    .single();
-  if (erroEmpresa || !empresaRow) {
+  // As duas consultas abaixo não dependem uma da outra — buscar em paralelo
+  // poupa uma volta ao banco em toda geração (um caminho síncrono e visível
+  // pro usuário, ver comentário no fim da função).
+  const [{ data: empresaRow, error: erroEmpresa }, { data: linhas, error: erroLinhas }] = await Promise.all([
+    supabase.from('empresa').select('segmento, cidade').eq('id', empresaId).single(),
+    supabase
+      .from('campo_extraido')
+      .select('campo, valor, origem, confianca, editado_pelo_usuario')
+      .eq('empresa_id', empresaId)
+      .order('criado_em', { ascending: true }),
+  ]);
+  if (erroEmpresa || !empresaRow || erroLinhas) {
     return { sucesso: false, erro: 'Não foi possível carregar os dados da empresa.' };
   }
   const segmento = (empresaRow.segmento as Segmento | null) ?? 'outro';
-
-  const { data: linhas, error: erroLinhas } = await supabase
-    .from('campo_extraido')
-    .select('campo, valor, origem, confianca, editado_pelo_usuario')
-    .eq('empresa_id', empresaId)
-    .order('criado_em', { ascending: true });
-  if (erroLinhas) {
-    return { sucesso: false, erro: 'Não foi possível carregar os dados da empresa.' };
-  }
   const empresaNormalizada = montarEmpresaNormalizada(calcularValoresEfetivos(linhas ?? []));
-
-  await supabase.from('evento_produto').insert({
-    empresa_id: empresaId,
-    tipo: 'estilo_enviado',
-    payload: { texto: pedido.texto, caracteres: pedido.texto.length },
-  });
 
   const inicio = Date.now();
   let usoTotal: UsoTokens | null = null;
@@ -95,6 +89,15 @@ export async function gerarNovaVersaoDoSite(
   };
 
   try {
+    // Dentro do try (não antes): uma falha de rede aqui não pode virar uma
+    // exceção não tratada — precisa do mesmo erro amigável que o resto da
+    // função já garante.
+    await supabase.from('evento_produto').insert({
+      empresa_id: empresaId,
+      tipo: 'estilo_enviado',
+      payload: { texto: pedido.texto, caracteres: pedido.texto.length },
+    });
+
     const estiloGerado = await gerarEstilo({
       texto: pedido.texto,
       segmento,
@@ -158,10 +161,26 @@ export async function gerarNovaVersaoDoSite(
         .insert({ empresa_id: empresaId })
         .select('id')
         .single();
-      if (erroSite || !novoSite) {
+      if (erroSite?.code === CODIGO_ERRO_UNICIDADE) {
+        // Duas chamadas concorrentes (ex.: duplo clique em "Gerar meu site")
+        // podem ter passado pelo select acima antes de qualquer uma inserir
+        // — a constraint única (site_empresa_id_key) barra a segunda, que
+        // busca de novo o site que a primeira acabou de criar em vez de
+        // falhar (mesmo padrão de adicionarFonte.ts para fonte_dados).
+        const { data: siteDaOutraChamada } = await supabase
+          .from('site')
+          .select('id')
+          .eq('empresa_id', empresaId)
+          .single();
+        if (!siteDaOutraChamada) {
+          return { sucesso: false, erro: 'Não foi possível criar o site. Tente novamente.' };
+        }
+        site = siteDaOutraChamada;
+      } else if (erroSite || !novoSite) {
         return { sucesso: false, erro: 'Não foi possível criar o site. Tente novamente.' };
+      } else {
+        site = novoSite;
       }
-      site = novoSite;
     }
 
     const { error: erroVersao } = await supabase.from('versao_site').insert({

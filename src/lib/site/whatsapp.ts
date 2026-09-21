@@ -1,16 +1,7 @@
 import type { EmpresaNormalizada } from '@/lib/schemas/empresa';
+import { momentoNoFusoDoNegocio } from './fuso';
 
 type HorarioFuncionamento = EmpresaNormalizada['horarios'][number];
-
-const DIAS_SEMANA_POR_INDICE_JS: HorarioFuncionamento['dia'][] = [
-  'dom',
-  'seg',
-  'ter',
-  'qua',
-  'qui',
-  'sex',
-  'sab',
-];
 
 // Normaliza um número brasileiro (com ou sem código do país, com ou sem
 // pontuação) para o formato E.164 que o wa.me espera: só dígitos, sempre
@@ -57,21 +48,21 @@ function paraMinutos(horaFormatada: string): number {
   return hora * 60 + minuto;
 }
 
-// Compara o horário atual contra os horários de funcionamento do dia (seção
-// "Fase 3": "fora do horário, mostrar 'Respondemos a partir de {abertura}'
-// e ainda permitir enviar"). `agora` é injetável pra facilitar teste.
+// Compara o horário atual (sempre no fuso do negócio, nunca no fuso do
+// servidor — ver lib/site/fuso.ts) contra os horários de funcionamento do
+// dia (seção "Fase 3": "fora do horário, mostrar 'Respondemos a partir de
+// {abertura}' e ainda permitir enviar"). `agora` é injetável pra facilitar
+// teste.
 export function statusAtendimento(
   horarios: HorarioFuncionamento[],
   agora: Date = new Date(),
 ): StatusAtendimento {
-  const diaAtual = DIAS_SEMANA_POR_INDICE_JS[agora.getDay()];
+  const { diaSemana: diaAtual, minutosDesdeMeiaNoite: minutosAgora } = momentoNoFusoDoNegocio(agora);
   const horariosHoje = horarios.filter((h) => h.dia === diaAtual);
 
   if (horariosHoje.length === 0) {
     return { aberto: false, proximaAberturaHoje: null };
   }
-
-  const minutosAgora = agora.getHours() * 60 + agora.getMinutes();
 
   for (const horario of horariosHoje) {
     if (minutosAgora >= paraMinutos(horario.abre) && minutosAgora < paraMinutos(horario.fecha)) {
