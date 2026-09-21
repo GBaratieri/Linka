@@ -451,3 +451,70 @@ com o cliente Supabase mockado usado no resto da suíte (RLS é aplicado pelo pr
 - **Texto desatualizado em `/empresa/[id]/confirmado`**: ainda dizia que a geração de estilo "será
   implementada na próxima fase" — sobrou de antes desta fase existir. Trocado por um CTA real para
   `/empresa/[id]/estilo`, encontrado durante o mesmo teste manual acima.
+
+## Revisão de código da Fase 3 e reforço de testes
+
+Pedido explícito de revisão mais dura sobre o diff da Fase 3, com 7 ângulos independentes (linha a
+linha, comportamento removido, rastreamento entre arquivos, armadilhas de linguagem,
+orquestrador/wrapper, reuso/simplificação/eficiência, altitude/convenções do CLAUDE.md) — 26
+achados registrados, 15 corrigidos nesta sessão. Também foram escritos ~90 testes novos
+(`tests/unit/estilo.test.ts`, `textos.test.ts`, `fuso.test.ts`, `componentes-site.test.tsx`,
+`tests/integration/geracao.test.ts`, `geracao-guarda.test.ts`, mais casos de borda adicionados em
+`guardas.test.ts` e `whatsapp.test.ts`), cobrindo os módulos que a Fase 3 tinha deixado sem teste
+(`lib/site/geracao.ts`, as heurísticas de mock de `ia/estilo.ts`/`ia/textos.ts`, e a lógica de
+omissão dos componentes do site).
+
+- **Fuso horário sempre do negócio, nunca do servidor**: `statusAtendimento` (horário de
+  funcionamento) e `geracoesUsadasNoMes` (limite mensal de gerações) liam `Date.getDay/getHours/
+  getMinutes` diretamente, que resolvem no fuso do *processo*, não em `America/Sao_Paulo` — correto
+  só por acaso nesta máquina (configurada em SP), mas errado num servidor em UTC (padrão da
+  Vercel). Corrigido com `lib/site/fuso.ts` (novo), que usa `Intl.DateTimeFormat` com
+  `timeZone: 'America/Sao_Paulo'` explícito — o Brasil não tem mais horário de verão desde 2019,
+  então o deslocamento é sempre fixo (-03:00), sem variação sazonal a considerar. Os testes de
+  `statusAtendimento` que usavam string de data sem fuso (`'2026-09-21T10:00:00'`, interpretada no
+  fuso da própria máquina) foram trocados para `-03:00` explícito, e ganharam um teste com sufixo
+  `Z` (UTC) para provar a conversão de verdade, não só "passar por sorte".
+- **Corrida ao criar o `site` de uma empresa** (mesma classe de bug do `fonte_dados`, corrigida mais
+  cedo nesta sessão): `gerarNovaVersaoDoSite` fazia `select` seguido de `insert` sem constraint
+  única em `site.empresa_id` — duas chamadas concorrentes (duplo clique) podiam criar dois sites
+  para a mesma empresa. Corrigido com a migração `20260921090000_site_unico_por_empresa.sql`
+  (`unique (empresa_id)`) e o mesmo padrão de `adicionarFonte.ts`: insere direto, e se a constraint
+  barrar (`23505`), busca de novo o site que a outra chamada acabou de criar em vez de falhar.
+- **Guarda anti-alucinação, dois ajustes de normalização**: telefone comparava dígitos crus, então
+  o mesmo número real com e sem código do país (`+55`) batia como "inventado" só por formatação —
+  corrigido comparando pelo DDD+número local (mesmo critério de comprimento do `whatsapp.ts`, sem
+  confundir um DDD 55 com o código do país). Horário informal ("9h", sem minutos) não era nem
+  reconhecido como menção de horário — corrigido tornando o marcador de hora (`:MM` ou um "h"
+  sozinho) obrigatório, não opcional, o que também evita o regime anterior aceitar qualquer número
+  solto de 0–23 (idade, ano abreviado) como horário. Os horários armazenados também passaram a ser
+  normalizados do mesmo jeito que os do texto gerado (evita um fato real como "9:00" nunca bater
+  contra "09:00").
+- **Guarda de endereço fica como limitação documentada, não corrigida**: ao contrário de
+  telefone/valor/horário, a checagem de endereço só barra quando a empresa não tem endereço nenhum
+  — com um endereço real cadastrado, qualquer menção a "Rua X" no texto gerado passa, mesmo que seja
+  uma rua diferente da real. Um fuzzy-match seguro é não trivial (a regex já captura só um pedaço do
+  endereço, "rua" + uma palavra) e arriscaria trocar falsos negativos por falsos positivos piores —
+  decisão de documentar em vez de arriscar um conserto apressado.
+- **Botão de WhatsApp com contraste abaixo do AA**: `.botao-whatsapp` usava branco sobre o verde da
+  marca (`#25D366`), medido em ~1,98:1 — bem abaixo do mínimo 4,5:1 que o resto do site garante via
+  `corrigirContraste`. Como é um par de cor fixo (identidade visual, não vem do `estilo_config`),
+  não passa pelo corretor dinâmico; trocado o texto para um verde escuro (`#0B3D1F`, ~6,2:1),
+  mantendo a cor de fundo da marca.
+- **CTA do Hero sem fallback para WhatsApp**: quando `destaque_cta` era `'telefone'` ou `'mapa'` mas
+  a empresa não tinha esse dado, o Hero ficava sem nenhum botão — mesmo com WhatsApp disponível.
+  Corrigido: WhatsApp vira o fallback padrão sempre que o destaque escolhido não tem o dado que
+  precisa, coerente com "WhatsApp como canal principal" (seção 1 do CLAUDE.md).
+- **Limite de gerações mensal e a corrida de criação do `site` continuam com uma janela de corrida
+  residual** (duplo clique pode passar do limite em 1, ou dois cliques quase simultâneos no
+  primeiro site): aceito por ora — `LIMITE_GERACOES_POR_MES` é um valor de configuração ainda
+  provisório (a própria seção 3 do CLAUDE.md registra isso como pendente até a Fase 7 trazer
+  `plano`/`assinatura` de verdade), e o custo de um bypass por duplo clique é centavos de uso de IA.
+  Resolver isso direito pediria um mecanismo de trava (lock consultivo do Postgres, transação
+  serializável, ou uma tabela de contador com incremento atômico) que não se justifica para um
+  limite ainda de teste.
+- Outros achados documentados mas não corrigidos nesta sessão (ver o relatório da revisão): a
+  duplicação do bloco de tool-use/retry/custo entre `ia/estruturador.ts`, `ia/estilo.ts` e
+  `ia/textos.ts`; `montarEmpresaNormalizada` sem validação Zod (ao contrário do que `previa/page.tsx`
+  já faz com `estilo_config`/`conteudo`); `resolverSecoes` só resolvido em tempo de render, nunca
+  persistido; e a falta de garantia de que a seção `hero` sobrevive à interseção quando a IA real
+  (não o mock) escolhe as seções.
