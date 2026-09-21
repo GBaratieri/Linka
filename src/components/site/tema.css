@@ -1,0 +1,60 @@
+/* Estilos dos sites gerados (Fase 3) — usam as variáveis CSS produzidas por
+   estiloParaVariaveisCss (lib/site/tema.ts). Arquivo próprio, importado só
+   pelas páginas que renderizam um site gerado (prévia e, na Fase 4, o
+   subdomínio publicado) — não faz parte do visual do próprio app/painel. */
+
+.site-gerado {
+  background-color: var(--cor-fundo);
+  color: var(--cor-texto);
+  font-family: var(--fonte-corpo);
+}
+
+.site-gerado h1,
+.site-gerado h2,
+.site-gerado h3 {
+  font-family: var(--fonte-titulos);
+}
+
+.botao-primario {
+  display: inline-block;
+  background-color: var(--cor-primaria);
+  color: var(--cor-fundo);
+  padding: 0.75rem 1.75rem;
+  border-radius: var(--raio-borda);
+  font-weight: 600;
+  text-decoration: none;
+  transition: opacity 0.15s;
+}
+
+.botao-primario:hover {
+  opacity: 0.88;
+}
+
+.botao-whatsapp {
+  display: inline-block;
+  background-color: #25d366;
+  color: #ffffff;
+  padding: 0.5rem 1rem;
+  border-radius: var(--raio-borda);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: opacity 0.15s;
+}
+
+.botao-whatsapp:hover {
+  opacity: 0.88;
+}
+
+.texto-auxiliar {
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
+.site-secao {
+  padding: var(--espacamento-secao) 1.5rem;
+}
+
+.site-secao + .site-secao {
+  border-top: 1px solid color-mix(in srgb, var(--cor-texto) 10%, transparent);
+}
