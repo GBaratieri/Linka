@@ -38,8 +38,14 @@ export default async function ConfirmadoPage({ params }: PageProps<'/empresa/[id
     <main className="mx-auto flex w-full max-w-lg flex-1 flex-col items-center gap-4 px-6 py-16 text-center">
       <h1 className="text-2xl font-semibold">Dados confirmados!</h1>
       <p className="text-sm text-gray-600 dark:text-gray-400">
-        A geração do site (escolha de estilo e prévia) será implementada na próxima fase.
+        Agora é só dizer como você quer o visual do seu site.
       </p>
+      <a
+        href={`/empresa/${id}/estilo`}
+        className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-gray-900"
+      >
+        Escolher o estilo do site
+      </a>
       <a
         href={`/empresa/${id}/adicionar-fonte`}
         className="text-sm text-gray-600 underline underline-offset-2 dark:text-gray-400"
